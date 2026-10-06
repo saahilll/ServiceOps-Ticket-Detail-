@@ -11,6 +11,7 @@ import type { AssetFieldState, AgentInfo } from './AssetFields';
 import { assetKeyInfoFields, applyAssetKeyInfo } from './AssetFields';
 import { AdditionalFieldsAccordion } from './AdditionalFieldsAccordion';
 import { getSlaPenaltyAmount, formatPenaltyAmount } from './TicketDrawerUtils';
+import { SlaStatusLive, SlaPolicyName } from './sla/SlaStatusLive';
 import { DateTimePickerPopup } from './DateTimePickerPopup';
 import { PinnedFieldsAccordion } from './PinnedFieldsAccordion';
 import { MiniCalendar, type CalendarEvent } from './MiniCalendar';
@@ -51,6 +52,8 @@ interface TicketPropertiesPanelProps {
   statusGroupLabel?: string;
   // Show the SLA Status card (hidden on the Hardware Asset detail page)
   showSla?: boolean;
+  // Request page (demo request): drive the SLA Status card from the SLA engine
+  slaLive?: boolean;
   // Drop the Requester Information accordion entirely (Project detail page)
   hideRequesterInfo?: boolean;
   // Drop the AI Suggestions rail group (Project detail page)
@@ -407,6 +410,7 @@ export function TicketPropertiesPanel(props: TicketPropertiesPanelProps) {
     showProblemFields = false,
     statusGroupLabel,
     showSla = true,
+    slaLive,
     hideRequesterInfo = false,
     hideSuggestions = false,
     showMembers = false,
@@ -2286,6 +2290,7 @@ export function TicketPropertiesPanel(props: TicketPropertiesPanelProps) {
             <div className="flex items-center gap-2">
               <Clock size={16} className="text-[#364658]" />
               <h3 className="text-[13px] font-semibold text-[#364658]">SLA Status</h3>
+              {slaLive && <SlaPolicyName />}
             </div>
             <button
               className="text-[#7B8FA5] hover:text-[#364658] transition-colors"
@@ -2298,7 +2303,8 @@ export function TicketPropertiesPanel(props: TicketPropertiesPanelProps) {
             </button>
           </div>
 
-          {slaStatusExpanded && (
+          {slaStatusExpanded && slaLive && <SlaStatusLive />}
+          {slaStatusExpanded && !slaLive && (
             <div className="px-4 pb-4 space-y-2">
               {/* Response Due In - On Track */}
               <div className="flex items-center justify-between gap-3">

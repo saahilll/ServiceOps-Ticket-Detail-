@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Clock, ArrowRight } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
+import { useSla, SLA_DEMO_ID, fmtDur, fmtWhen, STATE_LABEL, STATE_TONE } from './sla/slaEngine';
 
 interface TicketTransitionModalProps {
   isOpen: boolean;
@@ -266,6 +267,8 @@ function SlaCard({ label, value, valueColor, when, sub, badge }: { label: string
 const TOTAL_ELAPSED = fmtTotal(STATUS_SEGS.reduce((s, x) => s + x.seconds, 0));
 
 export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount = 0, status = 'Open' }: TicketTransitionModalProps) {
+  const sla = useSla();   // demo request reads the SLA engine, so these cards match the SLA Status card
+  const slaPenalty = sla.clocks.reduce((a, c) => a + c.penalty, 0);
   const [tab, setTab] = useState<'overview' | 'status' | 'assignment'>('overview');
   // A closed ticket has finished its lifecycle, so SLA targets read as outcomes (met/breached) rather than "due in".
   const closed = /closed|resolved|completed/i.test(status);
@@ -331,7 +334,20 @@ export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount
                   {/* SLA KPIs — penalty (when incurred) + the 3 SLAs, in one full-width row (cards grow equally regardless of count).
                       Closed tickets show the FINAL outcome (met/breached) instead of a running "due in" countdown. */}
                   <div className="flex flex-wrap gap-3 [&>*]:flex-1 [&>*]:basis-0 [&>*]:min-w-[150px]">
-                    {closed ? (
+                    {ticketId === SLA_DEMO_ID ? (
+                      <>
+                        {sla.clocks.map(r => {
+                          const over = Math.max(0, r.counted - r.def.target);
+                          const value = r.stop ? fmtDur(r.counted) : over ? `${fmtDur(over)} over` : `${fmtDur(r.left)} left`;
+                          return (
+                            <SlaCard key={r.def.id} label={r.def.name} value={value} valueColor={r.stop ? '#364658' : STATE_TONE[r.state].text}
+                              sub={`Target: ${fmtDur(r.def.target)}`}
+                              when={r.stop ? `${STATE_LABEL[r.state]} ${fmtWhen(r.stop)}` : r.due ? `Due ${fmtWhen(r.due)}` : 'Paused'}
+                              badge={{ text: STATE_LABEL[r.state], color: STATE_TONE[r.state].text }} />
+                          );
+                        })}
+                      </>
+                    ) : closed ? (
                       <>
                         <SlaCard label="First response" value="2 hours" valueColor="#364658" sub="Target: 5 hours" when="Responded Thursday, February 20, 2026 at 12:30 AM" badge={{ text: 'Met', color: '#16A34A' }} />
                         {penaltyAmount > 0 ? (
@@ -348,7 +364,7 @@ export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount
                         <SlaCard label="OLA due in" value="4 hours" valueColor="#D97706" sub="Target: 1 week" when="Thursday, February 20, 2026 at 04:00 PM" />
                       </>
                     )}
-                    {penaltyAmount > 0 && <StatCard label="Penalty" value={`$${penaltyAmount.toFixed(2)}`} valueColor="#8B5CF6" sub="For SLA breach" subColor="#9CA3AF" labelFirst />}
+                    {(ticketId === SLA_DEMO_ID ? slaPenalty : penaltyAmount) > 0 && <StatCard label="Penalty" value={`$${(ticketId === SLA_DEMO_ID ? slaPenalty : penaltyAmount).toFixed(2)}`} valueColor="#8B5CF6" sub="For SLA breach" subColor="#9CA3AF" labelFirst />}
                   </div>
                 </div>
               </div>

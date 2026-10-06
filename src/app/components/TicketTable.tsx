@@ -1,5 +1,6 @@
 import { Fragment, cloneElement, isValidElement, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
+import { SLA_DEMO_ID, slaSnapshot, shortValue, fmtDur } from './sla/slaEngine';
 import { CalendarClock, Copy, History, MoreVertical, SquarePen, GitMerge, TriangleAlert, Armchair, ArrowDown, ArrowLeftRight, ArrowLeftToLine, ArrowRightToLine, ArrowUp, ArrowUpDown, Check, ChevronDown, CircleCheck, CornerUpLeft, AirVent, BatteryFull, Cable, Camera, Database, FileText, Headphones, Keyboard, MemoryStick, Mouse, Plug, Printer, SprayCan, Trash2, Usb, Lightbulb, MonitorCog, Smartphone, Server, AppWindow, Lock, ChevronLeft, ChevronRight, ExternalLink, EyeOff, Filter, Flag, GripVertical, Inbox, Layers, ListChecks, MessageSquare, Package, Pencil, Pin, Plus, Search, SearchX, ThumbsDown, ThumbsUp, UserCheck, X } from 'lucide-react';
 import { IconAssetUpdate } from './SidebarIcons';
 import { toast } from 'sonner';
@@ -1540,6 +1541,13 @@ interface SlaInfo { tone: SlaTone; label: string; name: string; target: string; 
 /** Exported for the calendar tooltip — the same per-request SLA facts the pill's own
     hover shows (countdown, target window, SLA name). */
 export const dueBySla = (t: Ticket): SlaInfo => {
+  /* Demo request for the new SLA experience: the pill reads the SLA engine, same as the detail page. */
+  if (t.id === SLA_DEMO_ID) {
+    const { resolution: r } = slaSnapshot();
+    const tone: SlaTone = r.state === 'met' || r.state === 'missed' ? 'done' : r.state === 'breached' ? 'breached' : r.state === 'ok' ? 'ok' : 'due';
+    return { tone, label: shortValue(r), name: r.def.policy, target: fmtDur(r.def.target) + (r.def.hours.calendar ? ' (24 x 7)' : ' business hours'),
+      when: r.due ? `Due by ${longDateTime(r.due)}` : 'Paused' };
+  }
   /* A module that KNOWS its own SLA — a task has a real due date — hands the row the
      answer. What follows is the request queue's stand-in for rows that carry none. */
   const own = (t as any).x_sla as SlaInfo | undefined;

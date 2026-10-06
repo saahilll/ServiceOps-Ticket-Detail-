@@ -39,6 +39,8 @@ import { DiagnosisCard } from './DiagnosisCard';
 import { SolutionCard } from './SolutionCard';
 import { AISummary } from './AISummary';
 import { SLAHistoryModal } from './SLAHistoryModal';
+import { useSlaHeaderAlert, SlaDemoSwitch } from './sla/SlaStatusLive';
+import { SLA_DEMO_ID } from './sla/slaEngine';
 import { AddWorkLogModal } from './AddWorkLogModal';
 import { WorkHistoryModal } from './WorkHistoryModal';
 import { getSlaPenaltyAmount } from './TicketDrawerUtils';
@@ -746,6 +748,8 @@ onStackActiveGroupChange,
   const [workDescription, setWorkDescription] = useState('');
   const [showWorkHistory, setShowWorkHistory] = useState(false);
   const [showSLAHistory, setShowSLAHistory] = useState(false);
+  /* New SLA experience: one engine drives the header pill and the SLA Status card. */
+  const slaHeaderAlert = useSlaHeaderAlert();
   
   // Tab Overflow
   const [showMoreTabsDropdown, setShowMoreTabsDropdown] = useState(false);
@@ -2338,13 +2342,17 @@ onStackActiveGroupChange,
                 ) },
               ];
               /* SLA / approval state reads as tinted alert pills, not label:value KPIs. */
-              items.push(...alertKpiItems(getHeaderAlerts({
-                id: activeTicket?.id,
-                status: selectedStatus,
-                /* Only the service request is genuinely waiting on a decision — matches the
-                   "Approval Pending" chip this row used to carry. */
-                approvalsPending: activeTicket?.id === 'INC-35' ? 1 : 0,
-              })));
+              items.push(...alertKpiItems([
+                /* SLA pill comes from the SLA engine (same numbers as the SLA Status card + drawer). */
+                ...(activeTicket?.id === SLA_DEMO_ID ? [slaHeaderAlert] : []),
+                ...getHeaderAlerts({
+                  id: activeTicket?.id,
+                  status: selectedStatus,
+                  /* Only the service request is genuinely waiting on a decision — matches the
+                     "Approval Pending" chip this row used to carry. */
+                  approvalsPending: activeTicket?.id === 'INC-35' ? 1 : 0,
+                }).filter(a => activeTicket?.id !== SLA_DEMO_ID || !['sla', 'first-response', 'sla-closed', 'sla-due', 'sla-met'].includes(a.key)),
+              ]));
               return <HeaderKpiRow items={items} />;
             })()}
           </div>
@@ -6018,6 +6026,7 @@ onStackActiveGroupChange,
             setPinnedFieldsExpanded={setPinnedFieldsExpanded}
             slaStatusExpanded={slaStatusExpanded}
             setSlaStatusExpanded={setSlaStatusExpanded}
+            slaLive={activeTicket?.id === SLA_DEMO_ID}
             ticketFieldsExpanded={ticketFieldsExpanded}
             setTicketFieldsExpanded={setTicketFieldsExpanded}
             requesterInfoExpanded={requesterInfoExpanded}
@@ -7097,6 +7106,7 @@ onStackActiveGroupChange,
         />
       )}
 
+      {activeTicket?.id === SLA_DEMO_ID && <SlaDemoSwitch />}
       {/* SLA History Modal */}
       <SLAHistoryModal
         isOpen={showSLAHistory}
