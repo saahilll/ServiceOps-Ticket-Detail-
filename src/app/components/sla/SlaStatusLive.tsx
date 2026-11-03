@@ -3,13 +3,12 @@ import { CheckCircle2, AlertCircle, MinusCircle, ChevronRight, Clock } from 'luc
 import { SlaDetailsDrawer } from './SlaDetailsDrawer';
 import { DueByPill } from '../TicketTable';
 import type { HeaderAlert } from '../HeaderAlertPills';
-import { useSla, setScenario, SCENARIOS, headerSummary, fmtDur, fmtTime, fmtDue, shortValue, STATE_LABEL, type ClockId, type ClockResult, type ScenarioKey } from './slaEngine';
+import { useSla, ME, setScenario, SCENARIOS, headerSummary, fmtDur, fmtTime, fmtDue, shortValue, STATE_LABEL, type ClockId, type ClockResult, type ScenarioKey } from './slaEngine';
 
 /* SLA Status card body for the demo request, in the designers' card style (INC-31): label left,
  * hourglass pill right, a muted sub-line under it. Running clocks first, finished ones below as
  * one quiet line each, then Penalty and the SLA History button. */
 
-const ME = 'Sarah Johnson';
 const PILL_TONE = { ok: 'ok', risk: 'due', paused: 'paused', breached: 'breached' } as const;
 const lower = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
 const policyShort = (r: ClockResult) => r.def.policy.replace(/ – .*$/, '');
@@ -75,10 +74,11 @@ export function SlaStatusLive() {
     );
   }
   if (edge === 'nosla') {
-    const due = scenario.dueBy!;
+    const due = scenario.dueBy!, left = (due.getTime() - now.getTime()) / 60000, over = left <= 0;
     return (
       <div className="px-4 pb-4">
-        <Row label="Due By" pill={<DueByPill tone="ok" label={`${fmtDur((due.getTime() - now.getTime()) / 60000)} left`} />} sub={[`Due ${fmtDue(due, now)}`, `set by ${ME}`]} onOpen={() => show(null)} />
+        <Row label="Due By" pill={<DueByPill tone={over ? 'breached' : 'ok'} label={`${fmtDur(left)} ${over ? 'over' : 'left'}`} />}
+          sub={[`${over ? 'Breached, was due' : 'Due'} ${fmtDue(due, now)}`, `set by ${ME}`]} onOpen={() => show(null)} />
         <SlaDetailsDrawer isOpen={open} onClose={() => setOpen(false)} focus={null} />
       </div>
     );
@@ -167,8 +167,9 @@ export function useSlaHeaderAlert(): HeaderAlert | null {
   const { clocks, scenario, edge } = useSla();
   if (edge === 'error') return null;
   if (edge === 'nosla') {
-    const due = `Due ${fmtDue(scenario.dueBy!, scenario.now)}`;
-    return { key: 'sla', label: due, tone: 'info', icon: 'clock', tip: `${due}, set by ${ME}` };
+    const at = fmtDue(scenario.dueBy!, scenario.now);
+    if (scenario.dueBy! <= scenario.now) return { key: 'sla', label: 'Due By breached', tone: 'danger', icon: 'breach', tip: `Was due ${at}, set by ${ME}` };
+    return { key: 'sla', label: `Due ${at}`, tone: 'info', icon: 'clock', tip: `Due ${at}, set by ${ME}` };
   }
   const { clock: r } = headerSummary(clocks);
   if (!r) return null;

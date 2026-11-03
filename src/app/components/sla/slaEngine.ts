@@ -11,7 +11,7 @@ import { useSyncExternalStore } from 'react';
 
 const MIN = 60_000;
 export const D = (d: number, h: number, m: number) => new Date(2026, 8, d, h, m);
-const ME = 'Sarah Johnson';   // the signed-in technician in the demo
+export const ME = 'Sarah Johnson';   // the signed-in technician in the demo
 
 export interface Pause { from: Date; to: Date | null; why: string; by: string }
 export interface ManualDue { due: Date; by: string; at: Date; reason: string }
@@ -346,7 +346,9 @@ const lower = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
 export function events(r: ClockResult, s: Scenario): SlaEvent[] {
   const { def } = r, ps = pausesOf(def, s), isBiz = bizOf(def), out: SlaEvent[] = [];
   const add = (at: Date, kind: SlaEvent['kind'], text: string, by = 'SLA engine') => { if (at <= s.now) out.push({ at, kind, text, by }); };
-  add(def.start, 'attached', `Attached. ${def.startWhy}.`);
+  add(def.start, 'attached', def.kind === 'UC'
+    ? `${def.name.replace(' · UC', '')} contract applied when the vendor was set`
+    : `${def.policy.replace(/ – .*$/, '')} applied, counting from ${lower(def.startedWhen)}`);
   for (const p of ps) if (p.from >= def.start && p.from <= r.end) {
     add(p.from, 'paused', `Paused, ${lower(p.why)}`, p.by);
     if (p.to && p.to <= r.end) add(p.to, 'resumed', `Resumed after ${fmtDur(count(p.from, p.to, isBiz))}`, p.by);

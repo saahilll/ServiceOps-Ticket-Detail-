@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ChevronDown, X } from 'lucide-react';
 import {
-  useSla, setManualDue, revertManualDue, excuse, removeExcuse, setScenario, setDueBy, events, usage, whyThis,
-  PREVIOUS, SCENARIOS, SLA_DEMO_ID, fmtDue, fmtDur, fmtTime, STATE_LABEL, STATE_TONE, type ClockId, type ClockResult, type Scenario,
+  useSla, setManualDue, revertManualDue, excuse, removeExcuse, setScenario, setDueBy, events, usage, whyThis, headerSummary,
+  ME, PREVIOUS, SCENARIOS, SLA_DEMO_ID, fmtDue, fmtDur, fmtTime, STATE_LABEL, STATE_TONE, type ClockId, type ClockResult, type Scenario,
 } from './slaEngine';
 
 /* SLA History — the designers' 560px slide-over (white header, #F8FAFC body, white cards).
@@ -52,14 +52,16 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
   const [disclosed, setDisclosed] = useState<Set<string>>(new Set());
   const [currentOnly, setCurrentOnly] = useState(false);
   const [flash, setFlash] = useState<ClockId | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const bodyRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const cards = useRef<Partial<Record<ClockId, HTMLDivElement | null>>>({});
 
-  // open: reset, focus the close button, then scroll to (and briefly highlight) the clock the user clicked
+  // open: reset, expand the clicked clock (or the most urgent one), focus the dialog, then scroll to and briefly highlight it
   useEffect(() => {
     if (!isOpen) return;
-    setPanel(null); setDisclosed(new Set()); setCurrentOnly(false); setFlash(focus);
+    const lead = focus ?? headerSummary(clocks).clock?.def.id;
+    setPanel(null); setDisclosed(new Set()); setCurrentOnly(false); setFlash(focus); setExpanded(new Set(lead ? [lead] : []));
     const raf = requestAnimationFrame(() => {
       dialogRef.current?.focus({ preventScroll: true });
       const body = bodyRef.current, el = focus ? cards.current[focus] : null;
@@ -67,7 +69,7 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
     });
     const t = window.setTimeout(() => setFlash(null), 1600);
     return () => { cancelAnimationFrame(raf); window.clearTimeout(t); };
-  }, [isOpen, focus]);
+  }, [isOpen, focus]); // reset only when opened or refocused, never on a scenario edit while open
   // give focus back to whatever opened the slide-over
   useEffect(() => {
     if (!isOpen) return;
@@ -75,23 +77,26 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
     return () => opener?.focus?.();
   }, [isOpen]);
 
+  /** After an action: focus `target` if it still exists, else the card's header, else the dialog (an action can remove its own button). */
+  const refocus = (card: string, target?: string) => requestAnimationFrame(() =>
+    ((target && document.getElementById(target)) || document.getElementById(`sla-card-${card}`) || dialogRef.current)?.focus());
   const closePanel = () => {
-    const p = panel;
+    if (panel) refocus(panel.id, `sla-act-${panel.id}-${panel.kind}`);
     setPanel(null);
-    if (p) requestAnimationFrame(() => document.getElementById(`sla-act-${p.id}-${p.kind}`)?.focus());
   };
   // Esc closes an open inline panel first, then the slide-over
   useEffect(() => {
     if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') (panel ? closePanel() : onClose()); };
+    const onKey = (e: KeyboardEvent) => { if (e.key !== 'Escape') return; if (!panel) return onClose(); refocus(panel.id, `sla-act-${panel.id}-${panel.kind}`); setPanel(null); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  });
+  }, [isOpen, panel, onClose]);
   if (!isOpen) return null;
 
   const togglePanel = (id: string, kind: PanelKind) => setPanel(p => (p?.id === id && p.kind === kind ? null : { id, kind }));
-  const toggleDisclosure = (key: string) => setDisclosed(p => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n; });
-  const shared = { now, scenario, panel, togglePanel, closePanel, disclosed, toggleDisclosure };
+  const toggle = (set: typeof setDisclosed) => (key: string) => set(p => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const toggleDisclosure = toggle(setDisclosed), toggleCard = toggle(setExpanded);
+  const shared = { now, scenario, panel, togglePanel, closePanel, refocus, disclosed, toggleDisclosure, expanded, toggleCard };
 
   const groups: [string, ClockResult[]][] = [
     ['Customer SLA', clocks.filter(c => c.def.kind === 'SLA')],
@@ -142,7 +147,7 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
             </Section>
           ))}
           {earlier && !currentOnly && (
-            <Section title="Earlier SLA, canceled" count={1}><EarlierCard previous={previous} /></Section>
+            <Section title="Earlier SLA, canceled" count={1}><EarlierCard previous={previous} open={expanded.has('earlier')} onToggle={() => toggleCard('earlier')} /></Section>
           )}
         </div>
       </div>
@@ -153,7 +158,8 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
 
 interface Shared {
   now: Date; scenario: Scenario; panel: Panel; togglePanel: (id: string, k: PanelKind) => void; closePanel: () => void;
-  disclosed: Set<string>; toggleDisclosure: (key: string) => void;
+  refocus: (card: string, target?: string) => void;
+  disclosed: Set<string>; toggleDisclosure: (key: string) => void; expanded: Set<string>; toggleCard: (key: string) => void;
 }
 
 function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {
@@ -175,24 +181,26 @@ function Fact({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-/** Name, chip and the one number that matters, on one line. */
-function Head({ name, chip, value, valueColor }: { name: string; chip: ReactNode; value: string; valueColor: string }) {
+/** Name, chip and the one number that matters, on one line; with `open`, a chevron says it folds. */
+function Head({ name, chip, value, valueColor, open }: { name: string; chip: ReactNode; value: string; valueColor: string; open?: boolean }) {
   return (
-    <div className="flex items-center gap-2">
+    <span className="flex items-center gap-2">
       <span className="truncate text-[14px] font-semibold text-[#111827]">{name}</span>
       {chip}
       <span className="ml-auto whitespace-nowrap pl-3 text-[16px] font-semibold tabular-nums" style={{ color: valueColor }}>{value}</span>
-    </div>
+      {open !== undefined && <ChevronDown size={16} aria-hidden="true" className={`flex-shrink-0 text-[#9CA3AF] transition-transform ${open ? 'rotate-180' : ''}`} />}
+    </span>
   );
 }
+const CARD_HEAD = `block w-full rounded-xl px-4 py-3.5 text-left transition-colors hover:bg-[#FAFBFC] ${FOCUS}`;
 
-function Actions({ id, items, panel, onToggle }: { id: string; items: { kind?: PanelKind; label: string; run?: () => void }[]; panel: Panel; onToggle: (k: PanelKind) => void }) {
+function Actions({ id, items, panel, onToggle, refocus }: { id: string; items: { kind?: PanelKind; label: string; run?: () => void }[]; panel: Panel; onToggle: (k: PanelKind) => void; refocus: Shared['refocus'] }) {
   return (
     <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1">
       {items.map(a => (
         <button key={a.label} id={a.kind ? `sla-act-${id}-${a.kind}` : undefined} className={`${LINK} aria-expanded:text-[#3479B8] aria-expanded:underline`}
           aria-expanded={a.kind ? panel?.id === id && panel.kind === a.kind : undefined}
-          onClick={() => (a.kind ? onToggle(a.kind) : a.run?.())}>
+          onClick={() => { if (a.kind) return onToggle(a.kind); a.run?.(); refocus(id); }}>
           {a.label}
         </button>
       ))}
@@ -200,7 +208,7 @@ function Actions({ id, items, panel, onToggle }: { id: string; items: { kind?: P
   );
 }
 
-function ClockCard({ r, now, scenario, panel, togglePanel, closePanel, disclosed, toggleDisclosure }: { r: ClockResult } & Shared) {
+function ClockCard({ r, now, scenario, panel, togglePanel, closePanel, refocus, disclosed, toggleDisclosure, expanded, toggleCard }: { r: ClockResult } & Shared) {
   const { def } = r, id = def.id, chip = chipOf(r);
   const why = whyThis(r), evs = events(r, scenario);
   const lastEsc = evs.filter(e => e.kind === 'escalated').pop();
@@ -223,19 +231,22 @@ function ClockCard({ r, now, scenario, panel, togglePanel, closePanel, disclosed
   const whatKey = `${id}:what`, whoKey = `${id}:who`;
   const team = def.name.replace(' · OLA', '');
   const holder = def.kind === 'OLA' ? usage(r, scenario).find(u => u.group === team)?.who : undefined;
+  const isOpen = expanded.has(id);
 
   return (
     <div className={CARD}>
-      <div className="px-4 pb-4 pt-3.5">
-        <Head name={def.name} chip={<Chip {...chip} />} value={valueOf(r)} valueColor={valueColor} />
-        <div className="mt-2.5 flex items-center gap-3">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#EEF1F5]">
-            <div className="h-full rounded-full" style={{ width: `${Math.min(r.pct, 1) * 100}%`, backgroundColor: chip.tone.bar }} />
-          </div>
-          <span className="whitespace-nowrap text-[12px] tabular-nums text-[#7B8FA5]">{Math.round(r.pct * 100)} % used</span>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3">
+      <button id={`sla-card-${id}`} aria-expanded={isOpen} onClick={() => toggleCard(id)} className={CARD_HEAD}>
+        <Head name={def.name} chip={<Chip {...chip} />} value={valueOf(r)} valueColor={valueColor} open={isOpen} />
+        <span className="mt-2.5 flex items-center gap-3">
+          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#EEF1F5]">
+            <span className="block h-full rounded-full" style={{ width: `${Math.min(r.pct, 1) * 100}%`, backgroundColor: chip.tone.bar }} />
+          </span>
+          <span className="whitespace-nowrap text-[12px] tabular-nums text-[#7B8FA5]">{Math.round(r.pct * 100)}% used</span>
+        </span>
+      </button>
+      {isOpen && <>
+      <div className="px-4 pb-4">
+        <div className="mt-1 grid grid-cols-2 gap-x-6 gap-y-3">
           <Fact label="Started" value={fmtDue(def.start, now)} />
           <Fact label="Due" value={due} sub={dueSub} />
           {r.stop && <Fact label={def.doneVerb} value={fmtDue(r.stop, now)} />}
@@ -249,7 +260,7 @@ function ClockCard({ r, now, scenario, panel, togglePanel, closePanel, disclosed
           {def.kind === 'UC' && <Fact label="Vendor" value={def.rule[0][2]} />}
         </div>
 
-        <Actions id={id} items={actions} panel={panel} onToggle={k => togglePanel(id, k)} />
+        <Actions id={id} items={actions} panel={panel} onToggle={k => togglePanel(id, k)} refocus={refocus} />
         {open('due') && (
           <ChangeDue id={id} initial={r.due ?? r.policyDue} now={now} reason onCancel={closePanel}
             onSave={(d, reason) => { setManualDue(id, d, reason); closePanel(); }} />
@@ -281,6 +292,7 @@ function ClockCard({ r, now, scenario, panel, togglePanel, closePanel, disclosed
       </div>
       {disclosed.has(whatKey) && <Timeline evs={evs} />}
       {disclosed.has(whoKey) && <Usage r={r} scenario={scenario} />}
+      </>}
     </div>
   );
 }
@@ -309,7 +321,7 @@ function Timeline({ evs }: { evs: ReturnType<typeof events> }) {
               {!last && <span className="mt-1 w-px flex-1 bg-[#E5E7EB]" />}
             </span>
             <div className={`min-w-0 flex-1 ${last ? '' : 'pb-3'}`}>
-              <div className="text-[13px] leading-5 text-[#364658]">{e.text}</div>
+              <div className="text-pretty text-[13px] leading-5 text-[#364658]">{e.text}</div>
               {e.by !== 'SLA engine' && <div className="text-[12px] text-[#7B8FA5]">by {e.by}</div>}
             </div>
           </li>
@@ -392,7 +404,7 @@ function ExcuseForm({ id, onSave, onCancel }: { id: string; onSave: (reason: str
       <textarea id={`excuse-${id}`} rows={2} autoFocus value={reason} aria-invalid={error} aria-describedby={`excuse-help-${id}`}
         onChange={e => { setReason(e.target.value); setError(false); }}
         className={`mt-1 resize-none ${FIELD} ${error ? '!border-[#E74C3C]' : ''}`} />
-      {error && <p className="mt-1 text-[12px] text-[#E74C3C]">Add a reason so reports show why this was excused.</p>}
+      {error && <p role="alert" className="mt-1 text-[12px] text-[#E74C3C]">Add a reason so reports show why this was excused.</p>}
       <p id={`excuse-help-${id}`} className="mt-2 text-[12px] text-[#7B8FA5]">Only managers can excuse a breach. Reports still count it, marked Excused.</p>
       <div className="mt-3 flex gap-2">
         <button onClick={() => (reason.trim() ? onSave(reason.trim()) : setError(true))} className={PRIMARY}>Excuse breach</button>
@@ -403,7 +415,7 @@ function ExcuseForm({ id, onSave, onCancel }: { id: string; onSave: (reason: str
 }
 
 /* No SLA: one hand-set Due By, which can be moved and moved back. */
-function DueByCard({ now, scenario, panel, togglePanel, closePanel }: Shared) {
+function DueByCard({ now, scenario, panel, togglePanel, closePanel, refocus }: Shared) {
   const due = scenario.dueBy!, original = SCENARIOS.nosla.dueBy!;
   const left = Math.round((due.getTime() - now.getTime()) / 60000), over = left <= 0;
   const tone = over ? STATE_TONE.breached : STATE_TONE.ok;
@@ -417,24 +429,28 @@ function DueByCard({ now, scenario, panel, togglePanel, closePanel }: Shared) {
         value={over ? `${fmtDur(-left)} over` : `${fmtDur(left)} left`} valueColor={over ? tone.text : '#111827'} />
       <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3">
         <Fact label="Due" value={fmtDue(due, now)} />
-        <Fact label="Set by" value="Sarah Johnson" />
+        <Fact label="Set by" value={ME} />
       </div>
-      <Actions id="dueby" items={actions} panel={panel} onToggle={k => togglePanel('dueby', k)} />
+      <Actions id="dueby" items={actions} panel={panel} onToggle={k => togglePanel('dueby', k)} refocus={refocus} />
       {panel?.id === 'dueby' && <ChangeDue id="dueby" initial={due} now={now} onCancel={closePanel} onSave={d => { setDueBy(d); closePanel(); }} />}
     </div>
   );
 }
 
 /* The SLA the priority change replaced. Built from PREVIOUS only: events() can't describe a canceled clock. */
-function EarlierCard({ previous }: { previous: ClockResult[] }) {
+function EarlierCard({ previous, open, onToggle }: { previous: ClockResult[]; open: boolean; onToggle: () => void }) {
   return (
     <div className={CARD}>
-      <div className="px-4 pb-3 pt-3.5">
-        <div className="text-[14px] font-semibold text-[#111827]">{PREVIOUS.policy}, canceled {short(PREVIOUS.canceledAt)}</div>
-        <p className="mt-1 text-pretty text-[13px] text-[#4A5568]">
-          {PREVIOUS.change} by {PREVIOUS.by}. The new SLA counts from when the request was created, so time already spent carries over.
-        </p>
-      </div>
+      <button id="sla-card-earlier" aria-expanded={open} onClick={onToggle} className={CARD_HEAD}>
+        <span className="flex items-center gap-2">
+          <span className="text-[14px] font-semibold text-[#111827]">{PREVIOUS.policy}, canceled {short(PREVIOUS.canceledAt)}</span>
+          <ChevronDown size={16} aria-hidden="true" className={`ml-auto flex-shrink-0 text-[#9CA3AF] transition-transform ${open ? 'rotate-180' : ''}`} />
+        </span>
+      </button>
+      {open && <>
+      <p className="-mt-1.5 px-4 pb-3 text-pretty text-[13px] text-[#4A5568]">
+        {PREVIOUS.change} by {PREVIOUS.by}. The new SLA counts from when the request was created, so time already spent carries over.
+      </p>
       {previous.map(r => {
         // only a clock that finished before the cancel keeps its result; the rest were cut off by it
         const canceled = !r.stop || r.def.doneVerb === 'Canceled';
@@ -448,6 +464,7 @@ function EarlierCard({ previous }: { previous: ClockResult[] }) {
           </div>
         );
       })}
+      </>}
     </div>
   );
 }

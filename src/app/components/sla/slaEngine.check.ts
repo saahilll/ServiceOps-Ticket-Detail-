@@ -82,6 +82,8 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   assert.ok(ev.some(e => e.kind === 'escalated' && e.text.startsWith('Level 2 escalation: reassigned to Priya Mehta')));
   assert.ok(ev.some(e => e.kind === 'resumed' && e.text === 'Resumed after 1h 10m'));
   assert.ok(ev.some(e => e.kind === 'paused' && e.text === 'Paused, waiting on requester'));
+  assert.equal(ev[0].text, 'P2 High applied, counting from when the request was created');
+  assert.equal(events(c.uc!, sc())[0].text, 'Airtel contract applied when the vendor was set');
   assert.deepEqual(ev.map(e => e.at.getTime()), [...ev.map(e => e.at.getTime())].sort((a, b) => a - b));
   // both Resolution and the Network Team OLA are breached: the customer's SLA leads the header
   const hb = headerSummary(Object.values(c) as ClockResult[]);
