@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { X, Clock, ArrowRight } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
-import { useSla, SLA_DEMO_ID, fmtDur, fmtWhen, STATE_LABEL, STATE_TONE } from './sla/slaEngine';
+import { useSla, SLA_DEMO_ID, ASSIGNED, LOAD_ERROR, fmtDur, fmtDue, clockChip, clockValue } from './sla/slaEngine';
+import { statusOptions } from './TicketDrawerUtils';
 
 interface TicketTransitionModalProps {
   isOpen: boolean;
@@ -78,6 +79,18 @@ function aggregate(segs: Seg[]): Seg[] {
     else map.set(s.label, { ...s });
   }
   return [...map.values()];
+}
+
+/* The SLA demo request (INC-32) reads its bars from the story the SLA engine holds: every status change, and who held it. */
+const GROUP_COLOR: Record<string, string> = { 'Service Desk': '#F9A8D4', 'Network Team': '#EC4899' };
+const TECH_COLOR: Record<string, string> = { 'Darsh Patel': '#5EEAD4', 'Sarah Johnson': '#A78BFA' };
+/** Changes (when, to what, by whom), oldest first, as bar segments and timeline rows up to `now`. */
+function fromChanges(changes: { at: Date; to: string; by: string }[], now: Date, color: (label: string) => string) {
+  const secs = (i: number) => Math.max(0, ((changes[i + 1]?.at ?? now).getTime() - changes[i].at.getTime()) / 1000);
+  return {
+    segs: changes.map((c, i): Seg => ({ label: c.to, seconds: secs(i), color: color(c.to) })),
+    rows: changes.map((c, i): Row => ({ user: c.by, date: fmtDue(c.at, now), from: changes[i - 1]?.to ?? 'None', to: c.to, duration: fmtTotal(secs(i)) })),
+  };
 }
 
 const initials = (name: string) => name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
@@ -243,13 +256,15 @@ function StatCard({ label, value, sub, valueColor, subColor, labelFirst }: { lab
 
 /** SLA KPI card — label (+ optional outcome pill on the right), a larger value, an optional
  *  sub-line, and the exact date/time on hover. */
-function SlaCard({ label, value, valueColor, when, sub, badge }: { label: string; value: string; valueColor: string; when: string; sub?: string; badge?: { text: string; color: string } }) {
+function SlaCard({ label, value, valueColor, when, sub, badge }: { label: string; value: string; valueColor: string; when: string; sub?: string; badge?: { text: string; color: string; bg?: string } }) {
   return (
     <div className="rounded-lg border border-[#EEF1F5] bg-white p-3.5">
       <div className="flex items-center justify-between gap-2">
         <div className="text-[12px] text-[#6B7280]">{label}</div>
         {badge && (
-          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold flex-shrink-0" style={{ backgroundColor: `${badge.color}1A`, color: badge.color }}>{badge.text}</span>
+          badge.bg
+            ? <span className="inline-flex flex-shrink-0 items-center rounded-sm px-1.5 py-0.5 text-[11px] font-medium" style={{ backgroundColor: badge.bg, color: badge.color }}>{badge.text}</span>
+            : <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold flex-shrink-0" style={{ backgroundColor: `${badge.color}1A`, color: badge.color }}>{badge.text}</span>
         )}
       </div>
       <Tooltip>
@@ -263,9 +278,6 @@ function SlaCard({ label, value, valueColor, when, sub, badge }: { label: string
   );
 }
 
-/** Total elapsed = time the request spent across all statuses (shared by every tab). */
-const TOTAL_ELAPSED = fmtTotal(STATUS_SEGS.reduce((s, x) => s + x.seconds, 0));
-
 export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount = 0, status = 'Open' }: TicketTransitionModalProps) {
   const sla = useSla();   // demo request reads the SLA engine, so these cards match the SLA Status card
   const slaPenalty = sla.clocks.reduce((a, c) => a + c.penalty, 0);
@@ -273,6 +285,17 @@ export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount
   // A closed ticket has finished its lifecycle, so SLA targets read as outcomes (met/breached) rather than "due in".
   const closed = /closed|resolved|completed/i.test(status);
   if (!isOpen) return null;
+
+  const demo = ticketId === SLA_DEMO_ID, now = sla.scenario.now, log = sla.scenario.log ?? [];
+  const held = ASSIGNED.filter(a => a.from <= now);
+  const statusD = demo ? fromChanges(log, now, l => statusOptions.find(o => o.label === l)?.color ?? '#9CA3AF') : { segs: STATUS_SEGS, rows: STATUS_ROWS };
+  const groupD = demo ? fromChanges(held.map(a => ({ at: a.from, to: a.group, by: a.by })), now, l => GROUP_COLOR[l]) : { segs: GROUP_SEGS, rows: GROUP_ROWS };
+  const techD = demo ? fromChanges(held.map(a => ({ at: a.from, to: a.who, by: a.by })), now, l => TECH_COLOR[l]) : { segs: TECH_SEGS, rows: TECH_ROWS };
+  /** Total elapsed = time the request spent across all statuses: request created to now on the demo request. */
+  const totalElapsed = fmtTotal(statusD.segs.reduce((a, x) => a + x.seconds, 0));
+  const lifecycle = demo
+    ? (closed && log.length ? `${status} ${fmtDue(log[log.length - 1].at, now)}` : 'Still open')
+    : (closed ? 'Full lifecycle · start to close' : 'Still running — not yet closed');
 
   return (
     <>
@@ -313,7 +336,7 @@ export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount
                     return (
                       <div className="rounded-lg border border-[#EEF1F5] bg-white p-3.5 flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-[20px] font-semibold text-[#111827] leading-none">{TOTAL_ELAPSED}</div>
+                          <div className="text-[20px] font-semibold text-[#111827] leading-none">{totalElapsed}</div>
                           <div className="text-[12px] text-[#6B7280] mt-1.5">Total Time Elapsed</div>
                         </div>
                         <div className="flex flex-col items-end gap-1 flex-shrink-0 text-right">
@@ -321,7 +344,7 @@ export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount
                             <span className="size-1.5 rounded-full" style={{ backgroundColor: ss.dot }} />{status}
                           </span>
                           <span className="text-[11px]" style={{ color: closed ? '#9CA3AF' : '#D97706' }}>
-                            {closed ? 'Full lifecycle · start to close' : 'Still running — not yet closed'}
+                            {lifecycle}
                           </span>
                         </div>
                       </div>
@@ -333,19 +356,25 @@ export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount
                   </div>
                   {/* SLA KPIs — penalty (when incurred) + the 3 SLAs, in one full-width row (cards grow equally regardless of count).
                       Closed tickets show the FINAL outcome (met/breached) instead of a running "due in" countdown. */}
-                  <div className="flex flex-wrap gap-3 [&>*]:flex-1 [&>*]:basis-0 [&>*]:min-w-[150px]">
-                    {ticketId === SLA_DEMO_ID ? (
+                  <div className={demo ? 'grid grid-cols-3 gap-3' : 'flex flex-wrap gap-3 [&>*]:flex-1 [&>*]:basis-0 [&>*]:min-w-[150px]'}>
+                    {demo ? (
                       <>
+                        {/* Same value and chip as the SLA History slide-over, from the same engine. */}
                         {sla.clocks.map(r => {
-                          const over = Math.max(0, r.counted - r.def.target);
-                          const value = r.stop ? fmtDur(r.counted) : over ? `${fmtDur(over)} over` : `${fmtDur(r.left)} left`;
+                          const chip = clockChip(r);
                           return (
-                            <SlaCard key={r.def.id} label={r.def.name} value={value} valueColor={r.stop ? '#364658' : STATE_TONE[r.state].text}
+                            <SlaCard key={r.def.id} label={r.def.name} value={clockValue(r)} valueColor={r.state === 'ok' || r.state === 'met' ? '#111827' : chip.tone.text}
                               sub={`Target: ${fmtDur(r.def.target)}`}
-                              when={r.stop ? `${STATE_LABEL[r.state]} ${fmtWhen(r.stop)}` : r.due ? `Due ${fmtWhen(r.due)}` : 'Paused'}
-                              badge={{ text: STATE_LABEL[r.state], color: STATE_TONE[r.state].text }} />
+                              when={r.stop ? `${r.def.doneVerb} ${fmtDue(r.stop, now)}` : r.due ? `${r.breached ? 'Was due' : 'Due'} ${fmtDue(r.due, now)}` : 'Paused, the due time is set again when the clock restarts'}
+                              badge={{ text: chip.label, color: chip.tone.text, bg: chip.tone.bg }} />
                           );
                         })}
+                        {sla.edge === 'nosla' && sla.scenario.dueBy && (() => {
+                          const left = (sla.scenario.dueBy.getTime() - now.getTime()) / 60000, over = left <= 0;
+                          return <SlaCard label="Due By, set by hand" value={`${fmtDur(left)} ${over ? 'over' : 'left'}`} valueColor={over ? '#E74C3C' : '#111827'}
+                            when={`${over ? 'Was due' : 'Due'} ${fmtDue(sla.scenario.dueBy, now)}`} sub="No SLA applies" badge={over ? { text: 'Breached', color: '#E74C3C', bg: '#FFEBEE' } : { text: 'On track', color: '#27AE60', bg: '#E8F5E9' }} />;
+                        })()}
+                        {sla.edge === 'error' && <div className="text-[13px] text-[#4A5568]">{LOAD_ERROR}</div>}
                       </>
                     ) : closed ? (
                       <>
@@ -364,7 +393,7 @@ export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount
                         <SlaCard label="OLA due in" value="4 hours" valueColor="#D97706" sub="Target: 1 week" when="Thursday, February 20, 2026 at 04:00 PM" />
                       </>
                     )}
-                    {(ticketId === SLA_DEMO_ID ? slaPenalty : penaltyAmount) > 0 && <StatCard label="Penalty" value={`$${(ticketId === SLA_DEMO_ID ? slaPenalty : penaltyAmount).toFixed(2)}`} valueColor="#8B5CF6" sub="For SLA breach" subColor="#9CA3AF" labelFirst />}
+                    {(demo ? slaPenalty : penaltyAmount) > 0 && <StatCard label="Penalty" value={`$${(demo ? slaPenalty : penaltyAmount).toFixed(2)}`} valueColor="#8B5CF6" sub="For SLA breach" subColor="#9CA3AF" labelFirst />}
                   </div>
                 </div>
               </div>
@@ -372,29 +401,29 @@ export function TicketTransitionModal({ isOpen, onClose, ticketId, penaltyAmount
               <div className="space-y-5">
                 <div>
                   <div className="text-[14px] font-semibold text-[#364658] mb-2.5">Status</div>
-                  <TimeDistribution segments={STATUS_SEGS} />
+                  <TimeDistribution segments={statusD.segs} />
                 </div>
                 <div>
                   <div className="text-[14px] font-semibold text-[#364658] mb-2.5">Technician Group</div>
-                  <TimeDistribution segments={GROUP_SEGS} />
+                  <TimeDistribution segments={groupD.segs} />
                 </div>
                 <div>
                   <div className="text-[14px] font-semibold text-[#364658] mb-2.5">Technician</div>
-                  <TimeDistribution segments={TECH_SEGS} />
+                  <TimeDistribution segments={techD.segs} />
                 </div>
               </div>
             </div>
           )}
 
           {tab === 'status' && (
-            <TransitionSection timelineLabel="Status timeline" segments={STATUS_SEGS} rows={STATUS_ROWS} />
+            <TransitionSection timelineLabel="Status timeline" segments={statusD.segs} rows={statusD.rows} />
           )}
 
           {tab === 'assignment' && (
             <div className="space-y-8">
-              <TransitionSection title="Technician" timelineLabel="Assignment timeline" segments={TECH_SEGS} rows={TECH_ROWS} durationPrefix="Time with" />
+              <TransitionSection title="Technician" timelineLabel="Assignment timeline" segments={techD.segs} rows={techD.rows} durationPrefix="Time with" />
               <div className="pt-5 border-t border-[#F0F1F3]">
-                <TransitionSection title="Technician Group" timelineLabel="Group timeline" segments={GROUP_SEGS} rows={GROUP_ROWS} durationPrefix="Time with" />
+                <TransitionSection title="Technician Group" timelineLabel="Group timeline" segments={groupD.segs} rows={groupD.rows} durationPrefix="Time with" />
               </div>
             </div>
           )}

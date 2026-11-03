@@ -40,7 +40,7 @@ import { SolutionCard } from './SolutionCard';
 import { AISummary } from './AISummary';
 import { SLAHistoryModal } from './SLAHistoryModal';
 import { useSlaHeaderAlert, SlaDemoSwitch } from './sla/SlaStatusLive';
-import { SLA_DEMO_ID, PAUSING_STATUSES, useSla, setStatus } from './sla/slaEngine';
+import { SLA_DEMO_ID, PAUSING_STATUSES, useSla, setStatus, fmtDue, slaAudit } from './sla/slaEngine';
 import { SlaPauseDialog } from './sla/SlaPauseDialog';
 import { AddWorkLogModal } from './AddWorkLogModal';
 import { WorkHistoryModal } from './WorkHistoryModal';
@@ -670,7 +670,16 @@ onStackActiveGroupChange,
   
   // Check if this is the blank ticket (INC-32 or INC-35)
   // But also check if there are any conversations - if there are, show them instead of empty state
-  const hasConversationsForTicket = sentConversations.some(c => c.ticketId === activeTicketId);
+  const { status: slaStatus, scenario: slaScenario, clocks: slaClocks } = useSla();
+  // The SLA demo request's first response (Darsh Patel's reply), shown once it has happened in the scenario.
+  const slaReply = slaScenario.firstReply ?? new Date(2026, 8, 29, 16, 24);
+  const seededConversations = activeTicketId === SLA_DEMO_ID && !slaScenario.noReply && slaReply <= slaScenario.now ? [{
+    id: 'inc32-first-reply', ticketId: SLA_DEMO_ID, author: 'Darsh Patel', authorInitials: 'DP', authorColor: '#14B8A6',
+    timestamp: slaReply, type: 'reply' as const, to: 'darshak.modi@motadata.com',
+    content: "Hi Darshak,\n\nThanks for reporting this. I can see your laptop is connected to the office Wi-Fi but can't reach the internet. I'm checking the floor switch and the uplink now and will update you within the hour.\n\nIn the meantime, a wired port at your desk may work if you need to get online urgently.\n\nDarsh Patel\nService Desk",
+  }] : [];
+  const ticketConversations = [...seededConversations, ...sentConversations.filter(c => c.ticketId === activeTicketId)];
+  const hasConversationsForTicket = ticketConversations.length > 0;
   const isBlankTicket = (activeTicket?.id === 'INC-32' || activeTicket?.id === 'INC-35') && !hasConversationsForTicket;
   
   // Edit Service Request Item State
@@ -751,7 +760,6 @@ onStackActiveGroupChange,
   const [showSLAHistory, setShowSLAHistory] = useState(false);
   /* New SLA experience: one engine drives the header pill and the SLA Status card. */
   const slaHeaderAlert = useSlaHeaderAlert();
-  const { status: slaStatus, scenario: slaScenario, clocks: slaClocks } = useSla();
   
   // Tab Overflow
   const [showMoreTabsDropdown, setShowMoreTabsDropdown] = useState(false);
@@ -799,7 +807,9 @@ onStackActiveGroupChange,
   const pauseTrigger = useRef<Element | null>(null);
   const changeStatus = (label: string) => {
     if (activeTicket?.id !== SLA_DEMO_ID) return setSelectedStatus(label);
-    if (PAUSING_STATUSES.includes(label) && !PAUSING_STATUSES.includes(selectedStatus)) { pauseTrigger.current = document.activeElement; return setPausingTo(label); }
+    // ask only when something actually pauses: a running customer SLA or team OLA (the UC keeps running)
+    const pauses = slaClocks.some(c => c.def.kind !== 'UC' && (c.state === 'ok' || c.state === 'risk' || c.state === 'breached'));
+    if (pauses && PAUSING_STATUSES.includes(label) && !PAUSING_STATUSES.includes(selectedStatus)) { pauseTrigger.current = document.activeElement; return setPausingTo(label); }
     setStatus(label);
   };
   const closePause = () => {
@@ -3411,7 +3421,7 @@ onStackActiveGroupChange,
               ) : hasConversationsForTicket && (activeTicket?.id === 'INC-32' || activeTicket?.id === 'INC-35') ? (
                 // Show only sent conversations for blank tickets that have conversations
                 <BlankTicketConversationView 
-                  conversations={sentConversations.filter(c => c.ticketId === activeTicketId)}
+                  conversations={ticketConversations}
                   activeConversationTab={activeConversationTab}
                   setActiveConversationTab={setActiveConversationTab}
                   showSubTabSearch={showSubTabSearch}
@@ -3427,7 +3437,7 @@ onStackActiveGroupChange,
                   setShowForwardEditor={setShowForwardEditor}
                   setShowCollaborateEditor={setShowCollaborateEditor}
                   setShowNoteEditor={setShowNoteEditor}
-                  getRelativeTime={getRelativeTime}
+                  getRelativeTime={(d: Date) => (activeTicketId === SLA_DEMO_ID && d <= slaScenario.now ? fmtDue(d, slaScenario.now) : getRelativeTime(d))}
                   formatFullDate={formatFullDate}
                 />
               ) : (
@@ -5081,7 +5091,7 @@ onStackActiveGroupChange,
             )}
 
             {/* Audit Trails Tab Content */}
-            {activeMainTab === 'audit' && <AuditTrailsTabContent ticketId={activeTicket?.id} />}
+            {activeMainTab === 'audit' && <AuditTrailsTabContent ticketId={activeTicket?.id} entries={activeTicket?.id === SLA_DEMO_ID ? slaAudit(slaScenario) : undefined} />}
 
             {/* Resolution Tab Content */}
             {activeMainTab === 'resolution' && (
