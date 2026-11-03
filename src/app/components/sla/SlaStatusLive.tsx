@@ -7,7 +7,7 @@ import { useSla, setScenario, SCENARIOS, fmtDur, fmtTime, finishedLine, type Clo
  * (met ones live in the drawer). Status is said in words; the dot repeats it in color. */
 
 const plainName = (r: ClockResult) => r.def.name.replace(/^(OLA|UC) · /, '');
-const DOT: Record<ClockState, string> = { ok: '#27AE60', met: '#27AE60', risk: '#F39C12', paused: '#9AA8C0', breached: '#E74C3C', missed: '#E74C3C' };
+const DOT: Record<ClockState, string> = { ok: '#27AE60', met: '#27AE60', risk: '#F39C12', paused: '#9AA8C0', breached: '#E74C3C', missed: '#E74C3C', excused: '#94A3B8' };
 /** "3:10 PM" when it's today, "Wed 3:10 PM" when it isn't. */
 const dueAt = (d: Date, now: Date) => (d.toDateString() === now.toDateString() ? '' : d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ') + fmtTime(d);
 
@@ -16,6 +16,7 @@ function value(r: ClockResult) {
     case 'ok': case 'risk': return `${fmtDur(r.left)} left`;
     case 'paused': return `Paused, ${fmtDur(r.left)} left`;
     case 'met': return 'Met';
+    case 'excused': return 'Excused';
     case 'breached': case 'missed': return 'Breached';
   }
 }
@@ -101,7 +102,8 @@ export function SlaDemoSwitch() {
 /** Header alert pill for the Request page, from the same engine — so header and card agree. */
 export function useSlaHeaderAlert() {
   const { clocks } = useSla();
-  const res = clocks.find(c => c.def.id === 'resolution')!;
+  const res = clocks.find(c => c.def.id === 'resolution');
+  if (!res) return { key: 'sla', label: 'No SLA', tone: 'info', icon: 'clock', tip: 'No SLA applies to this request' } as const;
   // any customer SLA breached (running past due, or finished late) turns the header red, right away
   const hit = clocks.filter(c => c.def.kind === 'SLA' && (c.state === 'breached' || c.state === 'missed'));
   if (hit.length) {
@@ -110,7 +112,7 @@ export function useSlaHeaderAlert() {
       tip: hit.map(c => `${c.def.name} SLA: breached by ${fmtDur(c.counted - c.def.target)}`).join(' · ') } as const;
   }
   const tone = res.state === 'risk' ? 'warning' : res.state === 'met' ? 'success' : 'info';
-  const label = { ok: 'SLA Due', risk: 'SLA At Risk', paused: 'SLA Paused', breached: 'SLA Overdue', met: 'SLA Met', missed: 'SLA Breached' }[res.state];
+  const label = { ok: 'SLA Due', risk: 'SLA At Risk', paused: 'SLA Paused', breached: 'SLA Overdue', met: 'SLA Met', missed: 'SLA Breached', excused: 'SLA Excused' }[res.state];
   const icon = tone === 'success' ? 'check' : res.state === 'paused' ? 'waiting' : 'clock';
   return { key: 'sla', label, tone, icon, tip: `Resolution SLA: ${value(res)}` } as const;
 }
