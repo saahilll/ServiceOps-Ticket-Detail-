@@ -9,13 +9,14 @@ import { getSlaPenaltyAmount } from './TicketDrawerUtils';
  * label:value pair. Everything here is derived from what the page already shows (the SLA Status
  * card's own rules, the approval count, the status) so the header can never contradict the panel. */
 
-export type AlertTone = 'danger' | 'warning' | 'info' | 'success';
+export type AlertTone = 'danger' | 'warning' | 'info' | 'success' | 'neutral';
 
 const TONE: Record<AlertTone, { bg: string; text: string }> = {
   danger: { bg: '#FDECEA', text: '#C0392B' },
   warning: { bg: '#FEF6E7', text: '#B4690E' },
   info: { bg: '#EAF3FB', text: '#2E6FA8' },
   success: { bg: '#E8F5EE', text: '#1B7A54' },
+  neutral: { bg: '#F1F5F9', text: '#64748B' },
 };
 
 type AlertIcon = 'breach' | 'clock' | 'check' | 'approval' | 'waiting';

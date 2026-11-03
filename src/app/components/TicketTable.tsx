@@ -1,6 +1,6 @@
 import { Fragment, cloneElement, isValidElement, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
-import { SLA_DEMO_ID, slaSnapshot, shortValue, fmtDur } from './sla/slaEngine';
+import { SLA_DEMO_ID, slaSnapshot, shortValue, fmtDur, fmtTime } from './sla/slaEngine';
 import { CalendarClock, Copy, History, MoreVertical, SquarePen, GitMerge, TriangleAlert, Armchair, ArrowDown, ArrowLeftRight, ArrowLeftToLine, ArrowRightToLine, ArrowUp, ArrowUpDown, Check, ChevronDown, CircleCheck, CornerUpLeft, AirVent, BatteryFull, Cable, Camera, Database, FileText, Headphones, Keyboard, MemoryStick, Mouse, Plug, Printer, SprayCan, Trash2, Usb, Lightbulb, MonitorCog, Smartphone, Server, AppWindow, Lock, ChevronLeft, ChevronRight, ExternalLink, EyeOff, Filter, Flag, GripVertical, Inbox, Layers, ListChecks, MessageSquare, Package, Pencil, Pin, Plus, Search, SearchX, ThumbsDown, ThumbsUp, UserCheck, X } from 'lucide-react';
 import { IconAssetUpdate } from './SidebarIcons';
 import { toast } from 'sonner';
@@ -839,7 +839,7 @@ const fmtEffort = (min: number) => (min < 90 ? `${min} min` : `${Math.round(min 
    grid's pills show — so the breach forecast can never disagree with a pill. */
 const slaRemainingMinutes = (t: Ticket): number => {
   const info = dueBySla(t);
-  if (info.tone === 'done' || info.tone === 'breached') return 0;
+  if (info.tone === 'done' || info.tone === 'breached' || info.tone === 'paused') return 0;
   const UNIT: Record<string, number> = { w: 10080, d: 1440, h: 60, m: 1 };
   return info.label.split(' ').reduce((n, part) => {
     const m = part.match(/^(\d+)([wdhm])$/);
@@ -850,6 +850,7 @@ const breachBandOf = (t: Ticket): string => {
   const info = dueBySla(t);
   if (info.tone === 'done') return 'Met · resolved in SLA';
   if (info.tone === 'breached') return 'Breached · past SLA';
+  if (info.tone === 'paused') return 'Safe · comfortable buffer';  // a stopped clock cannot breach
   const left = slaRemainingMinutes(t);
   if (left <= 120) return 'Breach imminent · under 2 hours';
   if (left <= 1440 || left < effortMinutesOf(t) * 3) return 'At risk · due inside a day';
@@ -1471,12 +1472,13 @@ const statusColor = (v: string) => STATUS_OPTIONS.find((o) => o.label === v)?.co
 /* Due By Status — the SLA pill from the detail page: an hourglass in the SLA colour with a
    tinted background. Breached flips the glass over (sand run out) and turns red, a tight
    deadline is amber, anything comfortable is green. Closed rows have nothing left to run. */
-type SlaTone = 'breached' | 'due' | 'ok' | 'done';
+type SlaTone = 'breached' | 'due' | 'ok' | 'done' | 'paused';
 const SLA_TONE: Record<SlaTone, { bg: string; fg: string; flip?: boolean }> = {
   breached: { bg: '#FFEBEE', fg: '#E74C3C', flip: true },
   due: { bg: '#FFF3E0', fg: '#F39C12' },
   ok: { bg: '#E8F5E9', fg: '#27AE60' },
   done: { bg: '#F1F5F9', fg: '#64748B' },
+  paused: { bg: '#F1F5F9', fg: '#64748B' },
 };
 /** The grid's SLA pill (flipped hourglass when breached) — also used by the Kanban cards. */
 export function DueByPill({
@@ -1494,6 +1496,13 @@ export function DueByPill({
   const t = SLA_TONE[tone];
   return (
     <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 ${className}`} style={{ backgroundColor: t.bg }}>
+      {tone === 'paused' ? (
+        /* Paused: the clock is stopped, so a pause glyph (two bars) stands in for the hourglass. */
+        <svg xmlns="http://www.w3.org/2000/svg" width={compact ? 8 : 10} height={compact ? 11 : 13} viewBox="0 0 12 16" fill={t.fg} className="flex-shrink-0" aria-hidden="true">
+          <rect x="2" y="3" width="3" height="10" rx="1" />
+          <rect x="7" y="3" width="3" height="10" rx="1" />
+        </svg>
+      ) : (
       <svg
         xmlns="http://www.w3.org/2000/svg"
         width={compact ? 8 : 10}
@@ -1515,6 +1524,7 @@ export function DueByPill({
           </clipPath>
         </defs>
       </svg>
+      )}
       <span className={compact ? 'text-[11px] font-semibold' : 'text-[12px] font-semibold'} style={{ color: t.fg }}>
         {label}
       </span>
@@ -1544,9 +1554,11 @@ export const dueBySla = (t: Ticket): SlaInfo => {
   /* Demo request for the new SLA experience: the pill reads the SLA engine, same as the detail page. */
   if (t.id === SLA_DEMO_ID) {
     const { resolution: r } = slaSnapshot();
-    const tone: SlaTone = r.state === 'met' || r.state === 'missed' ? 'done' : r.state === 'breached' ? 'breached' : r.state === 'ok' ? 'ok' : 'due';
-    return { tone, label: shortValue(r), name: r.def.policy, target: fmtDur(r.def.target) + (r.def.hours.calendar ? ' (24 x 7)' : ' business hours'),
-      when: r.due ? `Due by ${longDateTime(r.due)}` : 'Paused' };
+    const TONE: Record<typeof r.state, SlaTone> = { ok: 'ok', risk: 'due', paused: 'paused', breached: 'breached', missed: 'breached', met: 'done', excused: 'done' };
+    return { tone: TONE[r.state], label: r.state === 'met' ? 'Met' : shortValue(r), name: r.def.policy,
+      target: fmtDur(r.def.target) + (r.def.hours.calendar ? ' (24 x 7)' : ' business hours'),
+      when: r.state === 'paused' ? `Paused since ${fmtTime(r.pausedNow!.from)}, ${r.pausedNow!.why.toLowerCase()}`
+        : r.stop ? `Resolved ${longDateTime(r.stop)}` : r.due ? `Due by ${longDateTime(r.due)}` : '' };
   }
   /* A module that KNOWS its own SLA — a task has a real due date — hands the row the
      answer. What follows is the request queue's stand-in for rows that carry none. */
@@ -3722,10 +3734,10 @@ export function TicketTable({
   };
   /* ---------- Grouping ---------- */
   const SLA_GROUP: Record<SlaTone, string> = {
-    breached: 'SLA Breached', due: 'Due Soon', ok: 'On Track', done: 'Met',
+    breached: 'SLA Breached', due: 'Due Soon', ok: 'On Track', done: 'Met', paused: 'Paused',
   };
   const SLA_GROUP_COLOR: Record<string, string> = {
-    'SLA Breached': '#E74C3C', 'Due Soon': '#F39C12', 'On Track': '#27AE60', Met: '#64748B',
+    'SLA Breached': '#E74C3C', 'Due Soon': '#F39C12', 'On Track': '#27AE60', Met: '#64748B', Paused: '#64748B',
   };
   // What VALUE a row contributes when grouped by a column; catalog columns use their
   // derived cell value, so grouping works for every column the same way.

@@ -10,7 +10,7 @@ import {
  * Three tabs by agreement type: SLA (response + resolution, penalty, earlier SLA in full) · OLA (team targets) · UC (vendor).
  * Every target row opens to show how it's counted. */
 
-interface Props { isOpen: boolean; onClose: () => void; focus: ClockId; editing?: boolean }
+interface Props { isOpen: boolean; onClose: () => void; focus: ClockId | null; editing?: boolean }
 
 type Kind = 'SLA' | 'OLA' | 'UC';
 const SEG = { run: '#3D8BD0', pause: '#A9B4C6', over: '#E74C3C', off: 'repeating-linear-gradient(135deg,#F1F3F6 0 4px,#E3E7ED 4px 6px)' };

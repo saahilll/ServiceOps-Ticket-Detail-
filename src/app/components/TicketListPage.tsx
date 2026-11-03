@@ -181,7 +181,8 @@ export const generateMockTickets = (): Ticket[] => {
       subject: subjects[i % subjects.length],
       requester,
       dueBy: new Date(2022, 3, 20 + (i % 10), 2 + (i % 12), 34),
-      createdBy: new Date(2022, 3, 19 + DAY_SPREAD[i % DAY_SPREAD.length], 3 + (i % 12), 30),
+      // INC-32 is the SLA demo request: its created time is the demo story's (Tue 29 Sep 2026, 4:10 PM)
+      createdBy: i === 2 ? new Date(2026, 8, 29, 16, 10) : new Date(2022, 3, 19 + DAY_SPREAD[i % DAY_SPREAD.length], 3 + (i % 12), 30),
       assignedTo: unassigned ? { name: 'Unassigned', initials: '' } : assignee,
       status,
       priority: priorities[i % priorities.length],
