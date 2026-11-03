@@ -78,7 +78,8 @@ export function SlaStatusLive() {
     const due = scenario.dueBy!;
     return (
       <div className="px-4 pb-4">
-        <Row label="Due By" pill={<DueByPill tone="ok" label={`${fmtDur((due.getTime() - now.getTime()) / 60000)} left`} />} sub={[`Due ${fmtDue(due, now)}`, `set by ${ME}`]} />
+        <Row label="Due By" pill={<DueByPill tone="ok" label={`${fmtDur((due.getTime() - now.getTime()) / 60000)} left`} />} sub={[`Due ${fmtDue(due, now)}`, `set by ${ME}`]} onOpen={() => show(null)} />
+        <SlaDetailsDrawer isOpen={open} onClose={() => setOpen(false)} focus={null} />
       </div>
     );
   }

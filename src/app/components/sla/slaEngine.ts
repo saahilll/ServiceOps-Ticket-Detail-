@@ -258,6 +258,8 @@ export const setManualDue = (id: ClockId, due: Date, reason: string) => patch({ 
 export const revertManualDue = (id: ClockId) => { const manual = { ...cur.manual }; delete manual[id]; patch({ manual }); };
 export const excuse = (id: ClockId, reason: string) => patch({ excuses: { ...cur.excuses, [id]: { by: ME, at: cur.now, reason } } });
 export const removeExcuse = (id: ClockId) => { const excuses = { ...cur.excuses }; delete excuses[id]; patch({ excuses }); };
+/** No-SLA request: its single hand-set Due By. */
+export const setDueBy = (dueBy: Date) => patch({ dueBy });
 /** A pausing status opens a pause (why = the reason, or the status itself); any other status closes it. Resolved / Closed also stop the clocks. */
 export function setStatus(label: string, reason?: string) {
   const now = cur.now, open = cur.pauses.some(p => !p.to);
