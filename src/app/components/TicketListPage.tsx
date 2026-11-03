@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { SLA_DEMO_ID, useSla } from './sla/slaEngine';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { Toolbar } from './Toolbar';
@@ -160,7 +161,8 @@ export const generateMockTickets = (): Ticket[] => {
 
   return Array.from({ length: 84 }, (_, i) => {
     const requester = requesters[i % requesters.length];
-    const assignee = assignees[i % assignees.length];
+    // INC-32 (index 2) is the SLA demo request, held by Sarah Johnson as in its detail page
+    const assignee = i === 2 ? assignees[6] : assignees[i % assignees.length];
     // New replies on a handful of rows per page — badges should be the exception a
     // technician scans FOR, not row furniture.
     const unread = i % 7 === 0 ? (i % 14 === 0 ? 3 : 2) : 0;
@@ -243,7 +245,10 @@ function DrillCrumb({
 }
 
 export function TicketListPage({ onNavigate }: { onNavigate?: (page: string) => void }) {
-  const [tickets, setTickets] = useState<Ticket[]>(generateMockTickets());
+  const [rawTickets, setTickets] = useState<Ticket[]>(generateMockTickets());
+  /* The SLA demo request's status comes from the SLA engine, so the row matches its detail page. */
+  const { status: slaStatus } = useSla();
+  const tickets = useMemo(() => rawTickets.map((t) => (t.id === SLA_DEMO_ID ? { ...t, status: slaStatus as Ticket['status'] } : t)), [rawTickets, slaStatus]);
   // Assignee / Status / Priority are editable straight from the grid.
   const updateTicket = (id: string, patch: Partial<Ticket>) =>
     setTickets((ts) => ts.map((t) => (t.id === id ? { ...t, ...patch } : t)));

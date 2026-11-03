@@ -1478,6 +1478,12 @@ onStackActiveGroupChange,
   useEffect(() => {
     if (activeTicket?.id === SLA_DEMO_ID) setSelectedStatus(slaStatus);
   }, [activeTicket?.id, slaStatus]);
+  // ...and it sits with the Network Team (the story's current group); cleared again when another request opens.
+  useEffect(() => {
+    if (activeTicket?.id !== SLA_DEMO_ID) return;
+    setSelectedTechGroup('Network Team');
+    return () => setSelectedTechGroup('');
+  }, [activeTicket?.id]);
 
   // Auto-expand accordions when switching to activity group
   useEffect(() => {

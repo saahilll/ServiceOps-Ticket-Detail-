@@ -287,11 +287,14 @@ export function slaSnapshot() {
 }
 
 /** The most urgent clock for the header pill: running ones first (breached > risk > on track > paused), then finished (breached late > excused > met).
- *  Among equals the one with less time left wins, then the earlier due. */
+ *  Among breached clocks the customer's SLA wins (SLA > OLA > UC), then the most minutes over.
+ *  Among the others the one with less time left wins, then the earlier due. */
 const URGENCY: ClockState[] = ['breached', 'risk', 'ok', 'paused', 'missed', 'excused', 'met'];
+const KIND_RANK = { SLA: 0, OLA: 1, UC: 2 } as const;
 export function headerSummary(clocks: ClockResult[]): { clock: ClockResult | null; state: ClockState | 'none' } {
   const due = (r: ClockResult) => r.due?.getTime() ?? 9e15;
-  const clock = [...clocks].sort((a, b) => URGENCY.indexOf(a.state) - URGENCY.indexOf(b.state) || a.left - b.left || due(a) - due(b))[0] ?? null;
+  const kind = (r: ClockResult) => (r.state === 'breached' || r.state === 'missed' ? KIND_RANK[r.def.kind] : 0);
+  const clock = [...clocks].sort((a, b) => URGENCY.indexOf(a.state) - URGENCY.indexOf(b.state) || kind(a) - kind(b) || a.left - b.left || due(a) - due(b))[0] ?? null;
   return clock ? { clock, state: clock.state } : { clock: null, state: 'none' };
 }
 

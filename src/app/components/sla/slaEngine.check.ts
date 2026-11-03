@@ -83,7 +83,10 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   assert.ok(ev.some(e => e.kind === 'resumed' && e.text === 'Resumed after 1h 10m'));
   assert.ok(ev.some(e => e.kind === 'paused' && e.text === 'Paused, waiting on requester'));
   assert.deepEqual(ev.map(e => e.at.getTime()), [...ev.map(e => e.at.getTime())].sort((a, b) => a - b));
-  assert.ok(headerSummary(Object.values(c) as ClockResult[]).state === 'breached');
+  // both Resolution and the Network Team OLA are breached: the customer's SLA leads the header
+  const hb = headerSummary(Object.values(c) as ClockResult[]);
+  assert.equal(hb.state, 'breached');
+  assert.equal(hb.clock!.def.id, 'resolution');
 }
 
 // paused: Resolution paused with no due; Pending pauses SLA and OLA but not the UC

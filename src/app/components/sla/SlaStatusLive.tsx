@@ -106,7 +106,10 @@ export function SlaStatusLive() {
   return (
     <div className="px-4 pb-4">
       {edge === 'archived' && scenario.deletedOn && (
-        <p className="mb-1 text-pretty text-[12px] text-[#7B8FA5]">This SLA was deleted on {scenario.deletedOn.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}. The request keeps its targets.</p>
+        <p className="mb-1 text-[12px] text-[#7B8FA5]">
+          This SLA was deleted on {scenario.deletedOn.getDate()} {scenario.deletedOn.toLocaleDateString('en-US', { month: 'short' })}.{' '}
+          <span className="whitespace-nowrap">The request keeps its targets.</span>
+        </p>
       )}
       {shown}
       {items.length > LIMIT && !all && (
@@ -162,7 +165,10 @@ export function SlaDemoSwitch() {
 export function useSlaHeaderAlert(): HeaderAlert | null {
   const { clocks, scenario, edge } = useSla();
   if (edge === 'error') return null;
-  if (edge === 'nosla') return { key: 'sla', label: 'Due by Wed 6:00 PM', tone: 'info', icon: 'clock', tip: `Due ${fmtDue(scenario.dueBy!, scenario.now)}, set by ${ME}` };
+  if (edge === 'nosla') {
+    const due = `Due ${fmtDue(scenario.dueBy!, scenario.now)}`;
+    return { key: 'sla', label: due, tone: 'info', icon: 'clock', tip: `${due}, set by ${ME}` };
+  }
   const { clock: r } = headerSummary(clocks);
   if (!r) return null;
   const name = r.def.name.replace(' · ', ' ');
