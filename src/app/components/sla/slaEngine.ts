@@ -351,7 +351,7 @@ export function events(r: ClockResult, s: Scenario): SlaEvent[] {
     : `${def.policy.replace(/ – .*$/, '')} applied, counting from ${lower(def.startedWhen)}`);
   for (const p of ps) if (p.from >= def.start && p.from <= r.end) {
     add(p.from, 'paused', `Paused, ${lower(p.why)}`, p.by);
-    if (p.to && p.to <= r.end) add(p.to, 'resumed', `Resumed after ${fmtDur(count(p.from, p.to, isBiz))}`, p.by);
+    if (p.to && p.to <= r.end) add(p.to, 'resumed', p.to.getTime() - p.from.getTime() < 60000 ? 'Resumed' : `Resumed after ${fmtDur(count(p.from, p.to, isBiz))}`, p.by);
   }
   if (r.manual) add(r.manual.at, 'overridden', `Due time changed to ${fmtTime(r.manual.due)}.${r.manual.reason ? ` Reason: ${r.manual.reason}` : ''}`, r.manual.by);
   if (r.breached && r.due) add(r.due, 'breached', 'Breached');

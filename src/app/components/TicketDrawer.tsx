@@ -40,7 +40,8 @@ import { SolutionCard } from './SolutionCard';
 import { AISummary } from './AISummary';
 import { SLAHistoryModal } from './SLAHistoryModal';
 import { useSlaHeaderAlert, SlaDemoSwitch } from './sla/SlaStatusLive';
-import { SLA_DEMO_ID, useSla } from './sla/slaEngine';
+import { SLA_DEMO_ID, PAUSING_STATUSES, useSla, setStatus } from './sla/slaEngine';
+import { SlaPauseDialog } from './sla/SlaPauseDialog';
 import { AddWorkLogModal } from './AddWorkLogModal';
 import { WorkHistoryModal } from './WorkHistoryModal';
 import { getSlaPenaltyAmount } from './TicketDrawerUtils';
@@ -750,7 +751,7 @@ onStackActiveGroupChange,
   const [showSLAHistory, setShowSLAHistory] = useState(false);
   /* New SLA experience: one engine drives the header pill and the SLA Status card. */
   const slaHeaderAlert = useSlaHeaderAlert();
-  const { status: slaStatus, scenario: slaScenario } = useSla();
+  const { status: slaStatus, scenario: slaScenario, clocks: slaClocks } = useSla();
   
   // Tab Overflow
   const [showMoreTabsDropdown, setShowMoreTabsDropdown] = useState(false);
@@ -792,6 +793,22 @@ onStackActiveGroupChange,
   const [solutionText, setSolutionText] = useState('');
   const [solutionData, setSolutionData] = useState<{ content: string; timestamp: string } | null>(null);
 
+  // Every status path ends here. On the SLA demo request the engine owns the status (the effect below mirrors it back);
+  // moving into Pending / On Hold first asks why the clocks pause.
+  const [pausingTo, setPausingTo] = useState<string | null>(null);
+  const pauseTrigger = useRef<Element | null>(null);
+  const changeStatus = (label: string) => {
+    if (activeTicket?.id !== SLA_DEMO_ID) return setSelectedStatus(label);
+    if (PAUSING_STATUSES.includes(label) && !PAUSING_STATUSES.includes(selectedStatus)) { pauseTrigger.current = document.activeElement; return setPausingTo(label); }
+    setStatus(label);
+  };
+  const closePause = () => {
+    setPausingTo(null);
+    const t = pauseTrigger.current as HTMLElement | null;
+    setTimeout(() => (t?.isConnected ? t : document.getElementById('header-status-btn'))?.focus());
+  };
+  useEffect(() => setPausingTo(null), [activeTicket?.id]);
+
   // Apply a status choice from the header dropdown (shared by click + Enter-key selection).
   const applyHeaderStatus = (option: { label: string; color: string }) => {
     if (option.label === 'Closed' && !solutionData) {
@@ -802,7 +819,7 @@ onStackActiveGroupChange,
       setShowHeaderStatusDropdown(false);
       return;
     }
-    setSelectedStatus(option.label);
+    changeStatus(option.label);
     setShowHeaderStatusDropdown(false);
   };
   // When the dropdown opens, highlight the current status; then ↑/↓ move, Enter selects, Esc closes.
@@ -2477,6 +2494,7 @@ onStackActiveGroupChange,
             <div className="relative">
               <div className={`inline-flex items-stretch h-8 rounded border bg-white overflow-hidden transition-colors ${showHeaderStatusDropdown ? 'border-[#3D8BD0]' : 'border-[#D0D5DD]'}`}>
                 <button
+                  id="header-status-btn"
                   onClick={() => setShowHeaderStatusDropdown((v) => !v)}
                   className="flex items-center gap-2 pl-3 pr-2.5 hover:bg-[#F9FAFB] transition-colors"
                   title="Update status"
@@ -2578,7 +2596,7 @@ onStackActiveGroupChange,
                               key={option.label}
                               className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#F9FAFB] text-left transition-colors"
                               onClick={() => {
-                                setSelectedStatus(option.label);
+                                changeStatus(option.label);
                                 setShowBadgeStatusDropdown(false);
                               }}
                             >
@@ -6077,7 +6095,7 @@ onStackActiveGroupChange,
             showSourceDropdown={showSourceDropdown}
             setShowSourceDropdown={setShowSourceDropdown}
             selectedStatus={selectedStatus}
-            setSelectedStatus={setSelectedStatus}
+            setSelectedStatus={changeStatus}
             selectedPriority={selectedPriority}
             setSelectedPriority={setSelectedPriority}
             selectedAssignee={selectedAssignee}
@@ -7118,6 +7136,10 @@ onStackActiveGroupChange,
       )}
 
       {activeTicket?.id === SLA_DEMO_ID && <SlaDemoSwitch />}
+      {pausingTo && (
+        <SlaPauseDialog status={pausingTo} clocks={slaClocks} onCancel={closePause}
+          onConfirm={reason => { setSelectedStatus(pausingTo); setStatus(pausingTo, reason); closePause(); }} />
+      )}
       {/* SLA History Modal */}
       <SLAHistoryModal
         isOpen={showSLAHistory}

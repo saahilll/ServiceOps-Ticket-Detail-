@@ -170,6 +170,8 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   const ev = events(clocksOf().resolution!, sc());
   assert.equal(ev.filter(e => e.kind === 'paused').length, 2);    // the earlier 10:30 pause plus this one
   assert.equal(ev.filter(e => e.kind === 'resumed').length, 2);
+  assert.ok(ev.some(e => e.kind === 'resumed' && e.text === 'Resumed'));   // a pause under a minute has no "after 0m"
+  assert.ok(!ev.some(e => /after 0m/.test(e.text)));
   assert.ok(ev.some(e => e.kind === 'paused' && hhmm(e.at) === '15:05'));
   assert.equal(clocksOf().resolution!.state, 'risk');
   setStatus('Resolved');
