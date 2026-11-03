@@ -1,7 +1,7 @@
 // Run from the app root: node src/app/components/sla/slaEngine.check.ts   (prints "ok")
 import assert from 'node:assert/strict';
 import {
-  SCENARIOS, CLOCKS, calc, D, fmtDue, fmtDur, finishedLine, headerSummary, events, usage, whyThis,
+  CLOCKS, calc, D, fmtDue, fmtDur, finishedLine, headerSummary, events, usage, whyThis,
   setScenario, setManualDue, revertManualDue, excuse, removeExcuse, setStatus, slaSnapshot, PREVIOUS, previousClocks,
   STATE_LABEL, type ScenarioKey, type ClockId, type ClockResult,
 } from './slaEngine.ts';
@@ -54,6 +54,11 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   const ur = usage(c.resolution!, sc());
   assert.deepEqual(ur.map(x => x.group), ['Service Desk', 'Network Team']);
   assert.equal(ur[1].to, null);
+  assert.deepEqual(usage(c['ola-network']!, sc()).map(x => [x.group, x.who]), [['Network Team', 'Sarah Johnson']]);
+  const uu = usage(c.uc!, sc());
+  assert.deepEqual(uu.map(x => [x.group, hhmm(x.from), hhmm(x.to)]), [['Network Team', '9:40', '13:25']]);
+  assert.equal(uu[0].counted, 225);
+  for (const k of ['ola-network', 'uc'] as const) for (const x of usage(c[k]!, sc())) assert.ok(x.to === null || x.to > x.from);
   const w = whyThis(c.resolution!);
   assert.equal(w.matched, 'Priority is High and Category is Network');
   assert.equal(w.hours, 'Network Team hours, Mon–Fri 9 AM–6 PM IST');
@@ -179,6 +184,7 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   clocksOf('error'); assert.equal(sc().edge, 'error');
   const m = clocksOf('many');
   assert.equal(Object.keys(m).length, 7);
+  assert.deepEqual(usage(m['ola-db']!, sc()).map(x => x.group), ['Network Team']);
   assert.equal(m['ola-db']!.state, 'paused');
   assert.equal(m['ola-sec']!.state, 'paused');
   setScenario('risk');
@@ -186,4 +192,3 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
 }
 
 console.log('ok');
-void SCENARIOS;

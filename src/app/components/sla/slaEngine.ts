@@ -163,7 +163,7 @@ export function calc(def: ClockDef, s: Scenario): ClockResult {
   const firstDue = walk(def.start, def.target, isBiz);
   const policyDue = walk(def.start, def.target, t => isBiz(t) && !inPause(t, ps.filter(p => p.to)));
   let due: Date | null = pausedNow && policyDue > end ? null : policyDue; // paused short of target: due unknown until restart
-  const manual = s.manual?.[def.id], excuse = s.excuses?.[def.id];
+  const manual = s.manual?.[def.id], exc = s.excuses?.[def.id];
   let left = def.target - counted;
   if (manual) {
     due = manual.due;
@@ -176,14 +176,14 @@ export function calc(def: ClockDef, s: Scenario): ClockResult {
   else state = left < def.target * 0.25 ? 'risk' : 'ok'; // at risk = under a quarter of the target left
   const early = state === 'met' && due && stop ? count(stop, due, t => isBiz(t) && !inPause(t, ps)) : 0;
   const breached = state === 'breached' || state === 'missed';
-  if (excuse) state = 'excused';
+  if (exc) state = 'excused';
   const pausedClosed = count(def.start, end, t => isBiz(t) && inPause(t, ps.filter(p => p.to)));
   // a hand-set due is penalised for the business minutes counted after it; an excused clock owes nothing
   const over = manual ? (end > manual.due ? work(manual.due, end) : 0) : Math.max(0, counted - def.target);
-  const penalty = def.penaltyPerHour && !excuse && over > 0 ? Math.ceil(over / 60) * def.penaltyPerHour : 0;
+  const penalty = def.penaltyPerHour && !exc && over > 0 ? Math.ceil(over / 60) * def.penaltyPerHour : 0;
   const budget = manual ? counted + left : def.target;
   const escLevel = def.escalations.reduce((m, e) => (counted >= Math.ceil(e.at * budget) ? Math.max(m, e.level) : m), 0);
-  return { penalty, pausedClosed, def, state, stop, end, calendar, outside: calendar - biz, paused: biz - counted, counted, left, due, policyDue, firstDue, early, pausedNow, manual, excuse,
+  return { penalty, pausedClosed, def, state, stop, end, calendar, outside: calendar - biz, paused: biz - counted, counted, left, due, policyDue, firstDue, early, pausedNow, manual, excuse: exc,
     budget, pct: budget > 0 ? counted / budget : 0, escLevel, breached };
 }
 
@@ -228,7 +228,7 @@ export const STATE_TONE: Record<ClockState, { bg: string; text: string; bar: str
   risk: { bg: '#FFF3E0', text: '#F39C12', bar: '#F39C12' },
   breached: { bg: '#FFEBEE', text: '#E74C3C', bar: '#E74C3C' },
   missed: { bg: '#FFEBEE', text: '#E74C3C', bar: '#E74C3C' },
-  paused: { bg: '#EEF1F6', text: '#5B6B86', bar: '#9AA8C0' },
+  paused: { bg: '#F1F5F9', text: '#64748B', bar: '#94A3B8' },
   excused: { bg: '#F1F5F9', text: '#64748B', bar: '#94A3B8' },
 };
 
@@ -371,9 +371,9 @@ export function usage(r: ClockResult, s: Scenario) {
   const { def } = r, ps = pausesOf(def, s), isBiz = bizOf(def);
   return ASSIGNED.flatMap(a => {
     const from = a.from > def.start ? a.from : def.start;
-    if (from >= r.end) return [];
     const to = a.to && a.to <= r.end ? a.to : r.stop ?? null;
     const upTo = to ?? r.end;
+    if (upTo <= from) return [];   // this stretch of the assignment is outside the clock's window
     return [{ group: a.group, who: a.who, from, to, counted: count(from, upTo, t => isBiz(t) && !inPause(t, ps)), paused: count(from, upTo, t => isBiz(t) && inPause(t, ps)) }];
   });
 }
