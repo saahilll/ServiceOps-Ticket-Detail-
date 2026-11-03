@@ -19,7 +19,14 @@ const TONE: Record<AlertTone, { bg: string; text: string }> = {
   neutral: { bg: '#F1F5F9', text: '#64748B' },
 };
 
-type AlertIcon = 'breach' | 'clock' | 'check' | 'approval' | 'waiting';
+type AlertIcon = 'breach' | 'clock' | 'check' | 'approval' | 'waiting' | 'pause';
+
+/** Two bars, the same pause glyph as the SLA card's paused pill. */
+const PauseGlyph = ({ size = 11, className }: { size?: number; className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 12 16" fill="currentColor" className={className} aria-hidden="true">
+    <rect x="2" y="3" width="3" height="10" rx="1" /><rect x="7" y="3" width="3" height="10" rx="1" />
+  </svg>
+);
 
 const ICONS = {
   breach: AlertTriangle,
@@ -27,6 +34,7 @@ const ICONS = {
   check: CheckCircle,
   approval: UserCheck,
   waiting: Hourglass,
+  pause: PauseGlyph,
 };
 
 export interface HeaderAlert {

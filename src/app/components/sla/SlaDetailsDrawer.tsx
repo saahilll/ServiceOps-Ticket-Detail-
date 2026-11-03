@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ChevronDown, X } from 'lucide-react';
 import {
-  useSla, setManualDue, revertManualDue, excuse, removeExcuse, setScenario, setDueBy, events, usage, whyThis, headerSummary,
-  ME, PREVIOUS, SCENARIOS, SLA_DEMO_ID, fmtDue, fmtDur, fmtTime, STATE_LABEL, STATE_TONE, type ClockId, type ClockResult, type Scenario,
+  useSla, setManualDue, revertManualDue, excuse, removeExcuse, setScenario, setDueBy, events, usage, whyThis, headerSummary, clockChip, clockValue, overBy,
+  lower, archivedNote, LOAD_ERROR, ME, PREVIOUS, SCENARIOS, SLA_DEMO_ID, fmtDue, fmtDur, fmtTime, STATE_LABEL, STATE_TONE, type ClockId, type ClockResult, type Scenario,
 } from './slaEngine';
 
 /* SLA History — the designers' 560px slide-over (white header, #F8FAFC body, white cards).
@@ -20,26 +20,13 @@ const CARD = 'rounded-xl border border-[#EEF1F5] bg-white shadow-[0_1px_2px_rgba
 const PRIMARY = `rounded bg-[#3D8BD0] px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[#3479B8] ${FOCUS}`;
 const SECONDARY = `rounded border border-[#DFE5ED] bg-white px-3 py-1.5 text-[12px] font-medium text-[#364658] transition-colors hover:bg-[#F3F4F6] ${FOCUS}`;
 const FIELD = 'w-full rounded border border-[#DFE5ED] bg-white px-2.5 py-1.5 text-[13px] text-[#364658] placeholder:text-[#9CA3AF] focus:border-[#3D8BD0] focus:outline-none focus:ring-2 focus:ring-[#3D8BD0]/20';
-const GREY = { bg: '#F1F5F9', text: '#64748B', bar: '#94A3B8' };
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const GREY = STATE_TONE.paused;
 
 /** "Tue 4:10 PM": timeline and table times, always the same width. */
 const short = (d: Date) => `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${fmtTime(d)}`;
-const lower = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
 /** datetime-local wants local "YYYY-MM-DDTHH:mm". */
 const local = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-const handedOver = (r: ClockResult) => r.state === 'met' && r.def.doneVerb === 'Handed over';
 const isRunning = (r: ClockResult) => !r.stop && r.state !== 'excused';
-
-function chipOf(r: ClockResult) {
-  return handedOver(r) ? { label: 'Handed over', tone: GREY } : { label: STATE_LABEL[r.state], tone: STATE_TONE[r.state] };
-}
-function valueOf(r: ClockResult) {
-  if (r.breached) return `${fmtDur(r.stop ? r.counted - r.budget : -r.left)} over`;
-  if (handedOver(r)) return `${fmtDur(r.counted)} of ${fmtDur(r.budget)}`;
-  if (r.state === 'met') return `Met in ${fmtDur(r.counted)}`;
-  return `${fmtDur(r.left)} left`;
-}
 
 function Chip({ label, tone }: { label: string; tone: { bg: string; text: string } }) {
   return <span className="inline-flex flex-shrink-0 items-center rounded-sm px-1.5 py-0.5 text-[11px] font-medium" style={{ backgroundColor: tone.bg, color: tone.text }}>{label}</span>;
@@ -95,7 +82,9 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
 
   const togglePanel = (id: string, kind: PanelKind) => setPanel(p => (p?.id === id && p.kind === kind ? null : { id, kind }));
   const toggle = (set: typeof setDisclosed) => (key: string) => set(p => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n; });
-  const toggleDisclosure = toggle(setDisclosed), toggleCard = toggle(setExpanded);
+  const toggleDisclosure = toggle(setDisclosed);
+  // collapsing a card also closes its open inline panel, so Esc never closes something you can't see
+  const toggleCard = (key: string) => { if (expanded.has(key) && panel?.id === key) setPanel(null); toggle(setExpanded)(key); };
   const shared = { now, scenario, panel, togglePanel, closePanel, refocus, disclosed, toggleDisclosure, expanded, toggleCard };
 
   const groups: [string, ClockResult[]][] = [
@@ -131,7 +120,7 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
         <div ref={bodyRef} className="relative flex-1 space-y-6 overflow-auto px-6 py-5">
           {edge === 'error' && (
             <div className={`${CARD} px-4 py-3.5 text-[13px] text-[#4A5568]`}>
-              SLA times couldn't be loaded.{' '}
+              {LOAD_ERROR}{' '}
               <button onClick={() => setScenario('risk')} className={LINK}>Try again</button>
             </div>
           )}
@@ -209,7 +198,7 @@ function Actions({ id, items, panel, onToggle, refocus }: { id: string; items: {
 }
 
 function ClockCard({ r, now, scenario, panel, togglePanel, closePanel, refocus, disclosed, toggleDisclosure, expanded, toggleCard }: { r: ClockResult } & Shared) {
-  const { def } = r, id = def.id, chip = chipOf(r);
+  const { def } = r, id = def.id, chip = clockChip(r);
   const why = whyThis(r), evs = events(r, scenario);
   const lastEsc = evs.filter(e => e.kind === 'escalated').pop();
   const valueColor = r.state === 'ok' || r.state === 'met' ? '#111827' : chip.tone.text;
@@ -236,7 +225,7 @@ function ClockCard({ r, now, scenario, panel, togglePanel, closePanel, refocus, 
   return (
     <div className={CARD}>
       <button id={`sla-card-${id}`} aria-expanded={isOpen} onClick={() => toggleCard(id)} className={CARD_HEAD}>
-        <Head name={def.name} chip={<Chip {...chip} />} value={valueOf(r)} valueColor={valueColor} open={isOpen} />
+        <Head name={def.name} chip={<Chip {...chip} />} value={clockValue(r)} valueColor={valueColor} open={isOpen} />
         <span className="mt-2.5 flex items-center gap-3">
           <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#EEF1F5]">
             <span className="block h-full rounded-full" style={{ width: `${Math.min(r.pct, 1) * 100}%`, backgroundColor: chip.tone.bar }} />
@@ -279,7 +268,7 @@ function ClockCard({ r, now, scenario, panel, togglePanel, closePanel, refocus, 
             {r.manual && <p className="mt-3 text-[13px] text-[#364658]">Due time set by {r.manual.by}{r.manual.reason ? `: ${r.manual.reason}` : '.'}</p>}
             {scenario.edge === 'archived' && scenario.deletedOn && def.policy.startsWith('P2 High') && (
               <p className="mt-3 text-[13px] text-[#364658]">
-                This SLA was deleted on {scenario.deletedOn.getDate()} {MONTHS[scenario.deletedOn.getMonth()]}. The request keeps the targets it had.
+                {archivedNote(scenario.deletedOn).join(' ')}
               </p>
             )}
           </InlinePanel>
@@ -301,7 +290,7 @@ function Disclosure({ label, open, onClick }: { label: string; open: boolean; on
   return (
     <button onClick={onClick} aria-expanded={open} className={`flex items-center gap-1 rounded py-2.5 text-[12px] font-medium text-[#4A5568] hover:text-[#111827] ${FOCUS}`}>
       {label}
-      <ChevronDown size={14} className={`text-[#9CA3AF] transition-transform ${open ? 'rotate-180' : ''}`} />
+      <ChevronDown size={14} aria-hidden="true" className={`text-[#9CA3AF] transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
   );
 }
@@ -459,7 +448,7 @@ function EarlierCard({ previous, open, onToggle }: { previous: ClockResult[]; op
             <span className="text-[13px] font-medium text-[#364658]">{r.def.name}</span>
             {canceled ? <Chip label="Canceled" tone={GREY} /> : <Chip label={STATE_LABEL[r.state]} tone={STATE_TONE[r.state]} />}
             <span className="ml-auto text-[13px] tabular-nums text-[#364658]">
-              {canceled ? `${fmtDur(r.counted)} counted when canceled` : r.breached ? `${fmtDur(r.counted - r.budget)} over` : `Met in ${fmtDur(r.counted)}`}
+              {canceled ? `${fmtDur(r.counted)} counted when canceled` : r.breached ? `${overBy(r)} over` : `Met in ${fmtDur(r.counted)}`}
             </span>
           </div>
         );

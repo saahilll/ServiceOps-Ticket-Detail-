@@ -1,6 +1,7 @@
 import { Fragment, cloneElement, isValidElement, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
-import { SLA_DEMO_ID, slaSnapshot, shortValue, fmtDur, fmtTime } from './sla/slaEngine';
+import { SLA_DEMO_ID, slaSnapshot, shortValue, fmtDur, fmtTime, PILL_TONE } from './sla/slaEngine';
+import { statusOptions as DETAIL_STATUS_OPTIONS } from './TicketDrawerUtils';
 import { CalendarClock, Copy, History, MoreVertical, SquarePen, GitMerge, TriangleAlert, Armchair, ArrowDown, ArrowLeftRight, ArrowLeftToLine, ArrowRightToLine, ArrowUp, ArrowUpDown, Check, ChevronDown, CircleCheck, CornerUpLeft, AirVent, BatteryFull, Cable, Camera, Database, FileText, Headphones, Keyboard, MemoryStick, Mouse, Plug, Printer, SprayCan, Trash2, Usb, Lightbulb, MonitorCog, Smartphone, Server, AppWindow, Lock, ChevronLeft, ChevronRight, ExternalLink, EyeOff, Filter, Flag, GripVertical, Inbox, Layers, ListChecks, MessageSquare, Package, Pencil, Pin, Plus, Search, SearchX, ThumbsDown, ThumbsUp, UserCheck, X } from 'lucide-react';
 import { IconAssetUpdate } from './SidebarIcons';
 import { toast } from 'sonner';
@@ -1467,7 +1468,8 @@ export function ColumnManager({
 }
 
 const presenceLabel = (c?: string) => (c === '#10B981' ? 'Available' : c === '#F59E0B' ? 'Away' : 'Offline');
-const statusColor = (v: string) => STATUS_OPTIONS.find((o) => o.label === v)?.color ?? '#6b7280';
+/* On Hold / Resolved are not list statuses, but the SLA demo request can carry them: use the detail page's dots. */
+const statusColor = (v: string) => (STATUS_OPTIONS.find((o) => o.label === v) ?? DETAIL_STATUS_OPTIONS.find((o) => o.label === v))?.color ?? '#6b7280';
 
 /* Due By Status — the SLA pill from the detail page: an hourglass in the SLA colour with a
    tinted background. Breached flips the glass over (sand run out) and turns red, a tight
@@ -1551,14 +1553,14 @@ interface SlaInfo { tone: SlaTone; label: string; name: string; target: string; 
 /** Exported for the calendar tooltip — the same per-request SLA facts the pill's own
     hover shows (countdown, target window, SLA name). */
 export const dueBySla = (t: Ticket): SlaInfo => {
-  /* Demo request for the new SLA experience: the pill reads the SLA engine, same as the detail page. */
-  if (t.id === SLA_DEMO_ID) {
-    const { resolution: r } = slaSnapshot();
-    const TONE: Record<typeof r.state, SlaTone> = { ok: 'ok', risk: 'due', paused: 'paused', breached: 'breached', missed: 'breached', met: 'done', excused: 'done' };
-    return { tone: TONE[r.state], label: r.state === 'met' ? 'Met' : shortValue(r), name: r.def.policy,
+  /* Demo request for the new SLA experience: the pill names the header's clock, read from the same SLA engine. */
+  const lead = t.id === SLA_DEMO_ID ? slaSnapshot().lead : null;
+  if (lead) {
+    const r = lead;
+    return { tone: PILL_TONE[r.state], label: r.state === 'met' ? 'Met' : shortValue(r), name: r.def.policy,
       target: fmtDur(r.def.target) + (r.def.hours.calendar ? ' (24 x 7)' : ' business hours'),
       when: r.state === 'paused' ? `Paused since ${fmtTime(r.pausedNow!.from)}, ${r.pausedNow!.why.toLowerCase()}`
-        : r.stop ? `Resolved ${longDateTime(r.stop)}` : r.due ? `Due by ${longDateTime(r.due)}` : '' };
+        : r.stop ? `${r.def.doneVerb} ${longDateTime(r.stop)}` : r.due ? `Due by ${longDateTime(r.due)}` : '' };
   }
   /* A module that KNOWS its own SLA — a task has a real due date — hands the row the
      answer. What follows is the request queue's stand-in for rows that carry none. */

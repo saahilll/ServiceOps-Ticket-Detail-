@@ -1,7 +1,7 @@
 // Run from the app root: node src/app/components/sla/slaEngine.check.ts   (prints "ok")
 import assert from 'node:assert/strict';
 import {
-  CLOCKS, calc, D, fmtDue, fmtDur, finishedLine, headerSummary, events, usage, whyThis,
+  CLOCKS, calc, D, fmtDue, fmtDur, finishedLine, headerSummary, events, usage, whyThis, shortValue, clockValue, overBy, clocksFor,
   setScenario, setManualDue, revertManualDue, excuse, removeExcuse, setStatus, slaSnapshot, PREVIOUS, previousClocks,
   STATE_LABEL, type ScenarioKey, type ClockId, type ClockResult,
 } from './slaEngine.ts';
@@ -196,6 +196,64 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   assert.equal(m['ola-sec']!.state, 'paused');
   setScenario('risk');
   assert.equal(sc().edge, undefined);
+}
+
+// one "over" figure: a hand-set due in the past, then Resolve. Card, slide-over, list pill and timeline all say 1h 05m.
+{
+  clocksOf('risk');
+  setManualDue('resolution', D(30, 14, 0), '');
+  setStatus('Resolved');
+  const r = clocksOf().resolution!;
+  assert.equal(r.state, 'missed');
+  assert.equal(overBy(r), '1h 05m');
+  assert.equal(shortValue(r), '1h 05m over');           // card and list pill
+  assert.equal(clockValue(r), '1h 05m over');           // slide-over and transition dialog
+  assert.equal(finishedLine(r), 'Resolved 3:05 PM, 1h 05m late');   // timeline
+  assert.ok(events(r, sc()).some(e => e.kind === 'breached' && e.text === 'Resolved 3:05 PM, 1h 05m late'));
+  assert.equal(slaSnapshot().lead!.def.id, 'resolution');   // the finished-late customer SLA leads header and list
+  assert.equal(sc().log!.at(-1)!.to, 'Resolved');
+  // the level 2 the hand-set due triggers is sent when the due was set (3:05 PM), not back-dated to 2:00 PM
+  assert.deepEqual(r.escalated.map(e => [e.level, hhmm(e.at)]), [[1, '14:20'], [2, '15:05']]);
+}
+
+// a customer SLA that finished late reaches the header; the list pill always names the header's clock
+{
+  const c = clocksOf('late');
+  const h = headerSummary(Object.values(c) as ClockResult[]);
+  assert.equal(h.clock!.def.id, 'first');
+  assert.equal(h.state, 'missed');
+  clocksOf('overdue');
+  assert.equal(headerSummary(clocksFor(sc())).clock!.def.id, 'first');
+  assert.equal(slaSnapshot().lead!.def.id, 'first');
+  assert.equal(shortValue(slaSnapshot().lead!), '30m over');
+}
+
+// Ruling O: the vendor clock never fronts a request unless it is breached or finished late
+{
+  const c = clocksOf('ok');
+  assert.equal(c.uc!.state, 'ok');
+  const h = headerSummary(Object.values(c) as ClockResult[]);
+  assert.equal(h.clock!.def.id, 'ola-network');
+  assert.equal(h.state, 'ok');
+  const lateUc = { ...c.uc!, state: 'breached' as const, left: -5 };
+  assert.equal(headerSummary([c.resolution!, lateUc]).clock!.def.id, 'uc');
+}
+
+// a hand-set due keeps the escalation already sent under the policy time
+{
+  const r = clocksOf('manual').resolution!;
+  assert.equal(r.escLevel, 1);
+  assert.equal(hhmm(r.escalated[0].at), '14:20');
+  assert.ok(events(r, sc()).some(e => e.kind === 'escalated' && e.text.startsWith('Level 1') && hhmm(e.at) === '14:20'));
+}
+
+// status log: the story, then every change made on the page
+{
+  clocksOf('paused');
+  assert.deepEqual(sc().log!.map(c => [c.to, hhmm(c.at)]), [['Open', '16:10'], ['In Progress', '16:24'], ['Pending', '10:30'], ['In Progress', '11:40'], ['Pending', '14:40']]);
+  clocksOf('ok');
+  assert.equal(sc().log!.length, 2);   // the 10:30 pause hasn't happened yet at 10:15
+  setScenario('risk');
 }
 
 console.log('ok');

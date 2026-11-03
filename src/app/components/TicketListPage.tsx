@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { SLA_DEMO_ID, useSla } from './sla/slaEngine';
+import { SLA_DEMO_ID, useSla, setStatus } from './sla/slaEngine';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { Toolbar } from './Toolbar';
@@ -250,8 +250,11 @@ export function TicketListPage({ onNavigate }: { onNavigate?: (page: string) => 
   const { status: slaStatus } = useSla();
   const tickets = useMemo(() => rawTickets.map((t) => (t.id === SLA_DEMO_ID ? { ...t, status: slaStatus as Ticket['status'] } : t)), [rawTickets, slaStatus]);
   // Assignee / Status / Priority are editable straight from the grid.
-  const updateTicket = (id: string, patch: Partial<Ticket>) =>
+  // The SLA demo request's status belongs to the engine; the row mirrors it back above.
+  const updateTicket = (id: string, patch: Partial<Ticket>) => {
+    if (id === SLA_DEMO_ID && patch.status) setStatus(patch.status);
     setTickets((ts) => ts.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  };
   const [selectedTickets, setSelectedTickets] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   // While the grid is grouped it pages per group — the outer bar becomes a pinned summary.

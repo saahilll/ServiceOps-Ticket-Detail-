@@ -26,8 +26,8 @@ export function SlaPauseDialog({ status, clocks, onCancel, onConfirm }: Props) {
   const running = clocks.filter(c => c.state === 'ok' || c.state === 'risk' || c.state === 'breached');
   const stops = running.filter(c => c.def.kind !== 'UC').map(c => c.def.name);
   const goes = running.filter(c => c.def.kind === 'UC').map(c => c.def.name);
-  const text = !stops.length && !goes.length ? 'No SLA clocks are running, so nothing pauses.'
-    : `${stops.length ? `${plain(stops)} ${stops.length > 1 ? 'stop' : 'stops'} counting while the request is ${status}.` : `No SLA clocks pause while the request is ${status}.`}${goes.length ? ` ${plain(goes)} keeps running.` : ''}`;
+  // the page opens this only when at least one of them is running
+  const text = `${plain(stops)} ${stops.length > 1 ? 'stop' : 'stops'} counting while the request is ${status}.${goes.length ? ` ${plain(goes)} keeps running.` : ''}`;
 
   return createPortal(
     <div className="fixed inset-0 z-[10005] flex items-center justify-center p-6">

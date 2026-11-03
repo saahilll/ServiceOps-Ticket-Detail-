@@ -3,15 +3,15 @@ import { CheckCircle2, AlertCircle, MinusCircle, ChevronRight, Clock } from 'luc
 import { SlaDetailsDrawer } from './SlaDetailsDrawer';
 import { DueByPill } from '../TicketTable';
 import type { HeaderAlert } from '../HeaderAlertPills';
-import { useSla, ME, setScenario, SCENARIOS, headerSummary, fmtDur, fmtTime, fmtDue, shortValue, STATE_LABEL, type ClockId, type ClockResult, type ScenarioKey } from './slaEngine';
+import {
+  useSla, ME, setScenario, SCENARIOS, headerSummary, fmtDur, fmtTime, fmtDue, shortValue, overBy, lower, policyShort, archivedNote, LOAD_ERROR, PILL_TONE, STATE_LABEL,
+  type ClockId, type ClockResult, type ScenarioKey,
+} from './slaEngine';
 
 /* SLA Status card body for the demo request, in the designers' card style (INC-31): label left,
  * hourglass pill right, a muted sub-line under it. Running clocks first, finished ones below as
  * one quiet line each, then Penalty and the SLA History button. */
 
-const PILL_TONE = { ok: 'ok', risk: 'due', paused: 'paused', breached: 'breached' } as const;
-const lower = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
-const policyShort = (r: ClockResult) => r.def.policy.replace(/ – .*$/, '');
 
 /** ["At risk", "due today 4:20 PM IST", "set by Sarah Johnson", "level 1 escalation sent"]: shown joined by commas,
  *  each part kept whole so a wrap breaks between parts, never inside one. */
@@ -26,7 +26,7 @@ function subLine(r: ClockResult, now: Date) {
 /** One quiet line for a clock that has stopped (or was excused). */
 function finished(r: ClockResult, now: Date): { text: string; tone: 'met' | 'bad' | 'muted' } {
   if (r.state === 'excused') return { text: `${r.def.name} excused`, tone: 'muted' };
-  if (r.breached) return { text: `${r.def.name} breached, ${lower(r.def.doneVerb)} ${fmtDur(r.counted - r.budget)} late`, tone: 'bad' };
+  if (r.breached) return { text: `${r.def.name} breached, ${lower(r.def.doneVerb)} ${overBy(r)} late`, tone: 'bad' };
   if (r.def.doneVerb === 'Handed over') return { text: `${r.def.name} handed over ${r.stop!.toDateString() === now.toDateString() ? '' : `${r.stop!.toLocaleDateString('en-US', { weekday: 'short' })} `}at ${fmtTime(r.stop!)}`, tone: 'met' };
   return { text: `${r.def.name} met in ${fmtDur(r.counted)}`, tone: 'met' };
 }
@@ -41,7 +41,7 @@ function Row({ label, pill, sub, onOpen }: { label: string; pill: ReactNode; sub
       <span className="flex w-full items-center justify-between gap-3">
         <span className="flex min-w-0 items-center gap-1">
           <span className="truncate text-[12px] font-medium text-[#364658]">{label}</span>
-          {onOpen && <ChevronRight size={12} className="flex-shrink-0 text-[#7B8FA5] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />}
+          {onOpen && <ChevronRight size={12} aria-hidden="true" className="flex-shrink-0 text-[#7B8FA5] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />}
         </span>
         {pill}
       </span>
@@ -68,7 +68,7 @@ export function SlaStatusLive() {
   if (edge === 'error') {
     return (
       <div className="px-4 pb-4 text-[12px] text-[#4A5568]">
-        SLA times couldn't be loaded.{' '}
+        {LOAD_ERROR}{' '}
         <button onClick={() => setScenario('risk')} className={`rounded text-[12px] font-medium text-[#3D8BD0] hover:text-[#3479B8] hover:underline ${FOCUS}`}>Try again</button>
       </div>
     );
@@ -90,7 +90,7 @@ export function SlaStatusLive() {
   const items = [
     ...running.map(r => (
       <Row key={r.def.id} label={r.def.name} sub={subLine(r, now)} onOpen={() => show(r.def.id)}
-        pill={<DueByPill tone={PILL_TONE[r.state as keyof typeof PILL_TONE]} label={shortValue(r)} className="flex-shrink-0" />} />
+        pill={<DueByPill tone={PILL_TONE[r.state]} label={shortValue(r)} className="flex-shrink-0" />} />
     )),
     ...done.map(r => {
       const f = finished(r, now), [Icon, iconCls, textCls] = FIN_ICON[f.tone];
@@ -108,8 +108,8 @@ export function SlaStatusLive() {
     <div className="px-4 pb-4">
       {edge === 'archived' && scenario.deletedOn && (
         <p className="mb-1 text-[12px] text-[#7B8FA5]">
-          This SLA was deleted on {scenario.deletedOn.getDate()} {scenario.deletedOn.toLocaleDateString('en-US', { month: 'short' })}.{' '}
-          <span className="whitespace-nowrap">The request keeps its targets.</span>
+          {archivedNote(scenario.deletedOn)[0]}{' '}
+          <span className="whitespace-nowrap">{archivedNote(scenario.deletedOn)[1]}</span>
         </p>
       )}
       {shown}
@@ -138,11 +138,11 @@ export function SlaPolicyName() {
   if (edge === 'nosla') return <span className="truncate text-[12px] text-[#7B8FA5]">No SLA</span>;
   const res = clocks.find(c => c.def.id === 'resolution');
   if (!res) return null;
-  const was = res.def.replaced && res.def.replaced.at <= scenario.now ? res.def.replaced.policy.replace(/ – .*$/, '') : null;
+  const was = res.def.replaced && res.def.replaced.at <= scenario.now ? policyShort(res.def.replaced.policy) : null;
   const note = edge === 'archived' ? 'deleted' : was ? `was ${was}` : null;
   return (
     <span className="truncate text-[12px] text-[#7B8FA5]">
-      {policyShort(res)}{note && ` (${note})`}
+      {policyShort(res.def.policy)}{note && ` (${note})`}
     </span>
   );
 }
@@ -174,16 +174,16 @@ export function useSlaHeaderAlert(): HeaderAlert | null {
   const { clock: r } = headerSummary(clocks);
   if (!r) return null;
   const name = r.def.name.replace(' · ', ' ');
-  const tail = `, ${policyShort(r)}`;
+  const tail = `, ${policyShort(r.def.policy)}`;
   switch (r.state) {
     case 'ok': case 'risk':
       return { key: 'sla', label: `${name} ${shortValue(r)}`, tone: r.state === 'risk' ? 'warning' : 'info', icon: 'clock', tip: `${r.def.name}, due ${fmtDue(r.due!, scenario.now)}${tail}` };
     case 'breached':
       return { key: 'sla', label: `${name} breached`, tone: 'danger', icon: 'breach', tip: `${r.def.name}, was due ${fmtDue(r.due!, scenario.now)}${tail}` };
     case 'paused':
-      return { key: 'sla', label: 'SLA paused', tone: 'neutral', icon: 'waiting', tip: `${r.def.name}, ${lower(subLine(r, scenario.now).join(', '))}${tail}` };
+      return { key: 'sla', label: 'SLA paused', tone: 'neutral', icon: 'pause', tip: `${r.def.name}, ${lower(subLine(r, scenario.now).join(', '))}${tail}` };
     case 'missed':
-      return { key: 'sla', label: 'SLA breached', tone: 'danger', icon: 'breach', tip: `${finished(r, scenario.now).text}${tail}` };
+      return { key: 'sla', label: `${name} breached`, tone: 'danger', icon: 'breach', tip: `${finished(r, scenario.now).text}${tail}` };
     case 'excused':
       return { key: 'sla', label: 'SLA excused', tone: 'neutral', icon: 'check', tip: `${finished(r, scenario.now).text}${tail}` };
     case 'met':

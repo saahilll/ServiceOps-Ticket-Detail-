@@ -21,7 +21,10 @@ export interface Scenario {
   key: ScenarioKey; label: string; now: Date; pauses: Pause[];
   resolved?: Date; firstReply?: Date; noReply?: boolean; manual?: Partial<Record<ClockId, ManualDue>>; excuses?: Partial<Record<ClockId, Excuse>>; status: string;
   edge?: Edge; extra?: ClockDef[]; dueBy?: Date; deletedOn?: Date;
+  /** Every status change, oldest first. Seeded from the story by the store, appended by setStatus. */
+  log?: StatusChange[];
 }
+export interface StatusChange { at: Date; to: string; by: string }
 export type ScenarioKey = 'ok' | 'overdue' | 'late' | 'risk' | 'paused' | 'breached' | 'met' | 'manual' | 'excused' | 'nosla' | 'archived' | 'error' | 'many';
 
 /* Business hours come from the technician group (SlaPolicyCalculatorServiceImpl.calculateSLA:
@@ -38,10 +41,10 @@ export const PAUSING_STATUSES = ['Pending', 'On Hold'];
 
 export type ClockId = 'first' | 'resolution' | 'ola-desk' | 'ola-network' | 'uc' | 'ola-db' | 'ola-sec';
 export interface ClockDef {
-  id: ClockId; kind: 'SLA' | 'OLA' | 'UC'; name: string; short: string; start: Date; target: number; hours: Hours;
+  id: ClockId; kind: 'SLA' | 'OLA' | 'UC'; name: string; start: Date; target: number; hours: Hours;
   /** Penalty rule (SlaPenalty: penaltyPerUnit per started unit over target). */
   penaltyPerHour?: number;
-  stop: (s: Scenario) => Date | undefined; stopWhy: string; startWhy: string; startedWhen: string;
+  stop: (s: Scenario) => Date | undefined; stopWhy: string; startedWhen: string;
   /** What stopping this clock is called on screen: Replied, Resolved, Handed over, Restored. */
   doneVerb: string;
   policy: string; rule: [string, string, string][];
@@ -58,33 +61,33 @@ const P2_RULE: [string, string, string][] = [['Priority', 'is', 'High'], ['Categ
 const UC_RESTORED = D(30, 13, 25);
 const MANAGER = 'Priya Mehta (Network Team manager)';
 export const CLOCKS: ClockDef[] = [
-  { id: 'first', kind: 'SLA', name: 'First response', short: 'Response', start: D(29, 16, 10), target: 30, hours: NETWORK_HOURS, stop: s => (s.noReply ? undefined : s.firstReply ?? D(29, 16, 24)),
-    stopWhy: 'first reply sent to the requester', doneVerb: 'Replied', startWhy: 'Request created', startedWhen: 'When the request was created', policy: 'P2 High – Response SLA', rule: P2_RULE, escalations: [] },
-  { id: 'resolution', kind: 'SLA', name: 'Resolution', short: 'Resolution', start: D(29, 16, 10), target: 480, hours: NETWORK_HOURS, stop: s => s.resolved,
-    stopWhy: 'request resolved', doneVerb: 'Resolved', startWhy: 'Request created', startedWhen: 'When the request was created', policy: 'P2 High – Resolution SLA', rule: P2_RULE, penaltyPerHour: 50,
+  { id: 'first', kind: 'SLA', name: 'First response', start: D(29, 16, 10), target: 30, hours: NETWORK_HOURS, stop: s => (s.noReply ? undefined : s.firstReply ?? D(29, 16, 24)),
+    stopWhy: 'first reply sent to the requester', doneVerb: 'Replied', startedWhen: 'When the request was created', policy: 'P2 High – Response SLA', rule: P2_RULE, escalations: [] },
+  { id: 'resolution', kind: 'SLA', name: 'Resolution', start: D(29, 16, 10), target: 480, hours: NETWORK_HOURS, stop: s => s.resolved,
+    stopWhy: 'request resolved', doneVerb: 'Resolved', startedWhen: 'When the request was created', policy: 'P2 High – Resolution SLA', rule: P2_RULE, penaltyPerHour: 50,
     escalations: [{ level: 1, at: 0.75, action: `email to ${MANAGER}` }, { level: 2, at: 1, action: 'reassigned to Priya Mehta, SMS to technician' }],
     replaced: { policy: 'P3 Standard – Resolution SLA', target: '3 days', at: D(29, 17, 2), change: 'priority changed from Medium to High', by: ME } },
   /* A policy can carry one OLA per technician group, in order (SlaPolicy.olaConfigSet, OlaConfig.groupIds / olaOrder). */
-  { id: 'ola-desk', kind: 'OLA', name: 'Service Desk · OLA', short: 'OLA 1', start: D(29, 16, 10), target: 90, hours: DESK_HOURS, stop: () => D(29, 17, 20),
-    stopWhy: 'request moved to Network Team', doneVerb: 'Handed over', startWhy: 'Assigned to Service Desk', startedWhen: 'When the request was assigned to Service Desk',
+  { id: 'ola-desk', kind: 'OLA', name: 'Service Desk · OLA', start: D(29, 16, 10), target: 90, hours: DESK_HOURS, stop: () => D(29, 17, 20),
+    stopWhy: 'request moved to Network Team', doneVerb: 'Handed over', startedWhen: 'When the request was assigned to Service Desk',
     policy: 'P2 High – OLA 1 (Service Desk, 1h 30m)', rule: [['Technician group', 'is', 'Service Desk']], escalations: [] },
-  { id: 'ola-network', kind: 'OLA', name: 'Network Team · OLA', short: 'OLA 2', start: D(29, 17, 20), target: 360, hours: NETWORK_HOURS, stop: s => s.resolved,
-    stopWhy: 'request resolved', doneVerb: 'Resolved', startWhy: 'Assigned to Network Team', startedWhen: 'When the request was assigned to Network Team',
+  { id: 'ola-network', kind: 'OLA', name: 'Network Team · OLA', start: D(29, 17, 20), target: 360, hours: NETWORK_HOURS, stop: s => s.resolved,
+    stopWhy: 'request resolved', doneVerb: 'Resolved', startedWhen: 'When the request was assigned to Network Team',
     policy: 'P2 High – OLA 2 (Network Team, 6h)', rule: [['Technician group', 'is', 'Network Team']], escalations: [{ level: 1, at: 0.75, action: 'email to the Network Team' }] },
   /* Underpinning contract with the vendor — shown only when one applies (SlaHistoryType.UC). 24x7 contract.
    * It ignores Pending / On Hold: a UC has its own "Run UC" flag and in this demo it stays on. */
-  { id: 'uc', kind: 'UC', name: 'Airtel · UC', short: 'UC', start: D(30, 9, 40), target: 240, hours: ALL_HOURS,
+  { id: 'uc', kind: 'UC', name: 'Airtel · UC', start: D(30, 9, 40), target: 240, hours: ALL_HOURS,
     stop: s => (s.resolved && s.resolved < UC_RESTORED ? s.resolved : UC_RESTORED),
-    stopWhy: 'vendor restored the link', doneVerb: 'Restored', startWhy: 'Vendor set to Airtel Business', startedWhen: 'When the vendor was set to Airtel Business',
+    stopWhy: 'vendor restored the link', doneVerb: 'Restored', startedWhen: 'When the vendor was set to Airtel Business',
     policy: 'Airtel Business – Link restore UC (4h, 24 x 7)', rule: [['Vendor', 'is', 'Airtel Business']], escalations: [] },
 ];
 /** Two more team OLAs, only in the `many` scenario (stress test for a long card). Each waits on its own vendor. */
 const EXTRA_OLAS: ClockDef[] = [
-  { id: 'ola-db', kind: 'OLA', name: 'Database Team · OLA', short: 'OLA 3', start: D(30, 9, 15), target: 240, hours: { name: 'Database Team hours', line: WEEKDAYS }, stop: s => s.resolved,
-    stopWhy: 'request resolved', doneVerb: 'Resolved', startWhy: 'Assigned to Database Team', startedWhen: 'When the request was assigned to Database Team',
+  { id: 'ola-db', kind: 'OLA', name: 'Database Team · OLA', start: D(30, 9, 15), target: 240, hours: { name: 'Database Team hours', line: WEEKDAYS }, stop: s => s.resolved,
+    stopWhy: 'request resolved', doneVerb: 'Resolved', startedWhen: 'When the request was assigned to Database Team',
     policy: 'P2 High – OLA 3 (Database Team, 4h)', rule: [['Technician group', 'is', 'Database Team']], escalations: [], pauses: [wfc(D(30, 10, 45), null, 'Waiting on vendor')] },
-  { id: 'ola-sec', kind: 'OLA', name: 'Security Team · OLA', short: 'OLA 4', start: D(30, 9, 25), target: 240, hours: { name: 'Security Team hours', line: WEEKDAYS }, stop: s => s.resolved,
-    stopWhy: 'request resolved', doneVerb: 'Resolved', startWhy: 'Assigned to Security Team', startedWhen: 'When the request was assigned to Security Team',
+  { id: 'ola-sec', kind: 'OLA', name: 'Security Team · OLA', start: D(30, 9, 25), target: 240, hours: { name: 'Security Team hours', line: WEEKDAYS }, stop: s => s.resolved,
+    stopWhy: 'request resolved', doneVerb: 'Resolved', startedWhen: 'When the request was assigned to Security Team',
     policy: 'P2 High – OLA 4 (Security Team, 4h)', rule: [['Technician group', 'is', 'Security Team']], escalations: [], pauses: [wfc(D(30, 13, 10), null)] },
 ];
 
@@ -135,8 +138,8 @@ function walk(start: Date, mins: number, fn: (t: Date) => boolean) {
 export type ClockState = 'ok' | 'risk' | 'paused' | 'breached' | 'met' | 'missed' | 'excused';
 export interface ClockResult {
   def: ClockDef; state: ClockState; stop?: Date; end: Date;
-  calendar: number; outside: number; paused: number; counted: number;
-  left: number; due: Date | null; policyDue: Date; firstDue: Date; early: number;
+  paused: number; counted: number;
+  left: number; due: Date | null; policyDue: Date; firstDue: Date;
   /** Business minutes spent in pauses that have ENDED — only these have moved the due time. */
   pausedClosed: number;
   pausedNow?: Pause; manual?: ManualDue; excuse?: Excuse;
@@ -145,6 +148,8 @@ export interface ClockResult {
   budget: number;
   /** counted / budget, uncapped (1.2 = 20% over). */
   pct: number;
+  /** Escalations sent, oldest first. A level reached before a due time was set by hand is kept. */
+  escalated: { level: number; at: Date; action: string }[];
   /** Highest escalation level reached, 0 if none. */
   escLevel: number;
   /** Ran past its due time (running or finished late), even if it was later excused. */
@@ -159,7 +164,6 @@ export function calc(def: ClockDef, s: Scenario): ClockResult {
   const work = (a: Date, b: Date) => count(a, b, t => isBiz(t) && !inPause(t, ps));
   const biz = count(def.start, end, isBiz);
   const counted = work(def.start, end);
-  const calendar = Math.round((end.getTime() - def.start.getTime()) / MIN);
   const firstDue = walk(def.start, def.target, isBiz);
   const policyDue = walk(def.start, def.target, t => isBiz(t) && !inPause(t, ps.filter(p => p.to)));
   let due: Date | null = pausedNow && policyDue > end ? null : policyDue; // paused short of target: due unknown until restart
@@ -174,32 +178,27 @@ export function calc(def: ClockDef, s: Scenario): ClockResult {
   else if (left <= 0) state = 'breached';
   else if (pausedNow) state = 'paused';
   else state = left < def.target * 0.25 ? 'risk' : 'ok'; // at risk = under a quarter of the target left
-  const early = state === 'met' && due && stop ? count(stop, due, t => isBiz(t) && !inPause(t, ps)) : 0;
   const breached = state === 'breached' || state === 'missed';
   if (exc) state = 'excused';
   const pausedClosed = count(def.start, end, t => isBiz(t) && inPause(t, ps.filter(p => p.to)));
-  // a hand-set due is penalised for the business minutes counted after it; an excused clock owes nothing
-  const over = manual ? (end > manual.due ? work(manual.due, end) : 0) : Math.max(0, counted - def.target);
-  const penalty = def.penaltyPerHour && !exc && over > 0 ? Math.ceil(over / 60) * def.penaltyPerHour : 0;
   const budget = manual ? counted + left : def.target;
-  const escLevel = def.escalations.reduce((m, e) => (counted >= Math.ceil(e.at * budget) ? Math.max(m, e.level) : m), 0);
-  return { penalty, pausedClosed, def, state, stop, end, calendar, outside: calendar - biz, paused: biz - counted, counted, left, due, policyDue, firstDue, early, pausedNow, manual, excuse: exc,
-    budget, pct: budget > 0 ? counted / budget : 0, escLevel, breached };
-}
-
-export type SegKind = 'run' | 'off' | 'pause' | 'over';
-export function segments(r: ClockResult, s: Scenario): [SegKind, number][] {
-  const out: [SegKind, number][] = [], ps = pausesOf(r.def, s);
-  const dueT = r.due && r.state !== 'met' ? r.due.getTime() : Infinity;
-  let cur: SegKind | null = null, n = 0;
-  for (let t = r.def.start.getTime(); t < r.end.getTime(); t += MIN) {
-    const d = new Date(t);
-    const k: SegKind = !r.def.hours.calendar && !isWork(d) ? 'off' : inPause(d, ps) ? 'pause' : t >= dueT ? 'over' : 'run';
-    if (k !== cur) { if (cur) out.push([cur, n]); cur = k; n = 0; }
-    n++;
-  }
-  if (cur) out.push([cur, n]);
-  return out;
+  // a hand-set due is penalised for the business minutes counted after it; an excused clock owes nothing
+  const over = Math.max(0, counted - budget);
+  const penalty = def.penaltyPerHour && !exc && over > 0 ? Math.ceil(over / 60) * def.penaltyPerHour : 0;
+  // A level already sent under the policy target stays sent when the due is later set by hand; later levels use the new budget.
+  const reach = (mins: number) => walk(def.start, mins, t => isBiz(t) && !inPause(t, ps));
+  const countedAtManual = manual ? work(def.start, manual.at < end ? manual.at : end) : 0;
+  const escalated = def.escalations.flatMap(e => {
+    const pre = Math.ceil(e.at * def.target), post = Math.ceil(e.at * budget);
+    if (manual && countedAtManual >= pre) return [{ level: e.level, at: reach(pre), action: e.action }];
+    if (counted < post) return [];
+    // a level the hand-set due puts in the past is sent when the due is set, never back-dated
+    const at = reach(post);
+    return [{ level: e.level, at: manual && at < manual.at ? manual.at : at, action: e.action }];
+  });
+  const escLevel = escalated.reduce((m, e) => Math.max(m, e.level), 0);
+  return { penalty, pausedClosed, def, state, stop, end, paused: biz - counted, counted, left, due, policyDue, firstDue, pausedNow, manual, excuse: exc,
+    budget, pct: budget > 0 ? counted / budget : 0, escalated, escLevel, breached };
 }
 
 /* formatting */
@@ -209,8 +208,6 @@ export const fmtDur = (m: number) => {
   return h ? (r ? `${h}h ${String(r).padStart(2, '0')}m` : `${h}h`) : `${r}m`;
 };
 export const fmtTime = (d: Date) => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
-export const fmtDay = (d: Date) => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-export const fmtWhen = (d: Date) => `${fmtDay(d)}, ${fmtTime(d)}`;
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const dayNo = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5;
 /** "today 4:20 PM IST", "tomorrow 9:30 AM IST", "Wed 30 Sep, 4:20 PM IST" — relative to the scenario's now. */
@@ -232,20 +229,56 @@ export const STATE_TONE: Record<ClockState, { bg: string; text: string; bar: str
   excused: { bg: '#F1F5F9', text: '#64748B', bar: '#94A3B8' },
 };
 
+/** How far past its budget a clock ran: "35m". The one "over" figure every surface shows
+ *  (budget = the hand-set due when there is one, so a hand-set due changes it everywhere at once). */
+export const overBy = (r: ClockResult) => fmtDur(Math.max(0, r.counted - r.budget));
+
 /** Short value for pills: "1h 15m left", "45m over", "Paused", "Met". */
 export function shortValue(r: ClockResult) {
   switch (r.state) {
     case 'ok': case 'risk': return `${fmtDur(r.left)} left`;
     case 'paused': return 'Paused';
-    case 'breached': return `${fmtDur(-r.left)} over`;
+    case 'breached': case 'missed': return `${overBy(r)} over`;
     case 'met': return fmtDur(r.counted);
-    case 'missed': return `${fmtDur(r.counted - r.def.target)} over`;
     case 'excused': return 'Excused';
   }
 }
 
+const handedOver = (r: ClockResult) => r.state === 'met' && r.def.doneVerb === 'Handed over';
+/** The state chip: STATE_LABEL, except a finished team clock reads "Handed over" (grey). */
+export function clockChip(r: ClockResult) {
+  return handedOver(r) ? { label: 'Handed over', tone: STATE_TONE.paused } : { label: STATE_LABEL[r.state], tone: STATE_TONE[r.state] };
+}
+/** The big number on a clock card: "35m over", "1h 10m of 1h 30m", "Met in 14m", "1h 15m left". */
+export function clockValue(r: ClockResult) {
+  if (r.breached) return `${overBy(r)} over`;
+  if (handedOver(r)) return `${fmtDur(r.counted)} of ${fmtDur(r.budget)}`;
+  if (r.state === 'met') return `Met in ${fmtDur(r.counted)}`;
+  return `${fmtDur(r.left)} left`;
+}
+
+/** Clock state → the list's DueByPill tone (TicketTable's SlaTone). */
+export const PILL_TONE = { ok: 'ok', risk: 'due', paused: 'paused', breached: 'breached', missed: 'breached', met: 'done', excused: 'done' } as const satisfies Record<ClockState, string>;
+export const lower = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
+/** "P2 High – Resolution SLA" → "P2 High". */
+export const policyShort = (policy: string) => policy.replace(/ – .*$/, '');
+export const LOAD_ERROR = "SLA times couldn't be loaded.";
+/** The archived-policy note, in two sentences so a wrap can fall between them. */
+export const archivedNote = (d: Date) => [`This SLA was deleted on ${d.getDate()} ${MONTHS[d.getMonth()]}.`, 'The request keeps its targets.'] as const;
+
 /* tiny shared store so every surface reads the same scenario. All edits live on one scenario copy. */
-const fresh = (k: ScenarioKey): Scenario => { const s = SCENARIOS[k]; return { ...s, pauses: [...s.pauses], manual: { ...s.manual }, excuses: { ...s.excuses } }; };
+/** The request was created at 4:10 PM; Darsh Patel picked it up (In Progress) at 4:24 PM. Pauses and the resolve follow from the scenario. */
+const CREATED = D(29, 16, 10);
+function storyLog(s: Scenario): StatusChange[] {
+  const out: StatusChange[] = [{ at: CREATED, to: 'Open', by: 'System' }, { at: D(29, 16, 24), to: 'In Progress', by: 'Darsh Patel' }];
+  for (const p of s.pauses) {
+    out.push({ at: p.from, to: p.to ? 'Pending' : s.status, by: p.by });
+    if (p.to) out.push({ at: p.to, to: 'In Progress', by: p.by });
+  }
+  if (s.resolved) out.push({ at: s.resolved, to: 'Resolved', by: ME });
+  return out.filter(c => c.at <= s.now).sort((a, b) => a.at.getTime() - b.at.getTime());
+}
+const fresh = (k: ScenarioKey): Scenario => { const s = SCENARIOS[k]; return { ...s, pauses: [...s.pauses], manual: { ...s.manual }, excuses: { ...s.excuses }, log: storyLog(s) }; };
 let cur: Scenario = fresh('risk');
 let version = 0;
 const subs = new Set<() => void>();
@@ -263,51 +296,49 @@ export const setDueBy = (dueBy: Date) => patch({ dueBy });
 /** A pausing status opens a pause (why = the reason, or the status itself); any other status closes it. Resolved / Closed also stop the clocks. */
 export function setStatus(label: string, reason?: string) {
   const now = cur.now, open = cur.pauses.some(p => !p.to);
+  const log = label === cur.status ? cur.log : [...(cur.log ?? []), { at: now, to: label, by: ME }];
   if (PAUSING_STATUSES.includes(label)) {
-    patch({ status: label, pauses: open || cur.resolved ? cur.pauses : [...cur.pauses, { from: now, to: null, why: reason || label, by: ME }] });
+    patch({ status: label, log, pauses: open || cur.resolved ? cur.pauses : [...cur.pauses, { from: now, to: null, why: reason || label, by: ME }] });
   } else {
     const done = label === 'Resolved' || label === 'Closed';
-    patch({ status: label, pauses: cur.pauses.map(p => (p.to ? p : { ...p, to: now })), resolved: done ? cur.resolved ?? now : undefined });
+    patch({ status: label, log, pauses: cur.pauses.map(p => (p.to ? p : { ...p, to: now })), resolved: done ? cur.resolved ?? now : undefined });
   }
 }
 
 /** Clocks run in a fixed order: First response, Resolution, OLAs (by start), UC. */
 const rank = (c: ClockDef) => (c.kind === 'UC' ? 3 : c.kind === 'OLA' ? 2 : c.id === 'resolution' ? 1 : 0);
+/** The scenario's clocks, in card order. A clock shows only once it applies (e.g. the UC starts when the vendor is set). */
+export function clocksFor(s: Scenario) {
+  if (s.edge === 'nosla' || s.edge === 'error') return [];
+  return [...CLOCKS, ...(s.extra ?? [])].filter(c => c.start <= s.now).sort((a, b) => rank(a) - rank(b) || a.start.getTime() - b.start.getTime()).map(c => calc(c, s));
+}
 export function useSla() {
   useSyncExternalStore(f => { subs.add(f); return () => subs.delete(f); }, () => version);
   const s = cur, none = s.edge === 'nosla' || s.edge === 'error';
-  // a clock shows only once it applies (e.g. the UC starts when the vendor is set)
-  const defs = none ? [] : [...CLOCKS, ...(s.extra ?? [])].filter(c => c.start <= s.now).sort((a, b) => rank(a) - rank(b) || a.start.getTime() - b.start.getTime());
-  return { scenario: s, clocks: defs.map(c => calc(c, s)), previous: none ? [] : previousClocks(s), status: s.status, edge: s.edge ?? null };
+  return { scenario: s, clocks: clocksFor(s), previous: none ? [] : previousClocks(s), status: s.status, edge: s.edge ?? null };
 }
 
 /** The one demo request the new SLA experience runs on. */
 export const SLA_DEMO_ID = 'INC-32';
-/** Non-hook read for list cells (the grid pill for the demo request). */
+/** Non-hook read for list cells: the grid pill names the same clock as the header. */
 export function slaSnapshot() {
-  return { scenario: cur, resolution: calc(CLOCKS[1], cur) };
+  return { scenario: cur, lead: headerSummary(clocksFor(cur)).clock };
 }
 
 /** The most urgent clock for the header pill: running ones first (breached > risk > on track > paused), then finished (breached late > excused > met).
- *  Among breached clocks the customer's SLA wins (SLA > OLA > UC), then the most minutes over.
- *  Among the others the one with less time left wins, then the earlier due. */
+ *  A customer SLA that finished late ranks with the running breached clocks; in that bucket the customer's SLA wins
+ *  (SLA > OLA > UC, Ruling G), then the most minutes over. Among the others the one with less time left wins, then the earlier due.
+ *  The vendor clock fronts the request only when it is breached or finished late (Ruling O). */
 const URGENCY: ClockState[] = ['breached', 'risk', 'ok', 'paused', 'missed', 'excused', 'met'];
 const KIND_RANK = { SLA: 0, OLA: 1, UC: 2 } as const;
 export function headerSummary(clocks: ClockResult[]): { clock: ClockResult | null; state: ClockState | 'none' } {
   const due = (r: ClockResult) => r.due?.getTime() ?? 9e15;
-  const kind = (r: ClockResult) => (r.state === 'breached' || r.state === 'missed' ? KIND_RANK[r.def.kind] : 0);
-  const clock = [...clocks].sort((a, b) => URGENCY.indexOf(a.state) - URGENCY.indexOf(b.state) || kind(a) - kind(b) || a.left - b.left || due(a) - due(b))[0] ?? null;
+  const late = (r: ClockResult) => r.state === 'breached' || (r.state === 'missed' && r.def.kind === 'SLA');
+  const urg = (r: ClockResult) => (late(r) ? 0 : URGENCY.indexOf(r.state));
+  const kind = (r: ClockResult) => (late(r) ? KIND_RANK[r.def.kind] : 0);
+  const quietUc = (r: ClockResult) => (r.def.kind === 'UC' && r.state !== 'breached' && r.state !== 'missed' ? 1 : 0);
+  const clock = [...clocks].sort((a, b) => quietUc(a) - quietUc(b) || urg(a) - urg(b) || kind(a) - kind(b) || a.left - b.left || due(a) - due(b))[0] ?? null;
   return clock ? { clock, state: clock.state } : { clock: null, state: 'none' };
-}
-
-/** One plain sentence on why the clock reads the way it does — only when there is something to explain. */
-export function whyLine(r: ClockResult): string | null {
-  if (r.pausedNow && r.state === 'paused') return `Paused since ${fmtTime(r.pausedNow.from)} while waiting for the customer.`;
-  if (r.manual) return `Due set by hand by ${r.manual.by}${r.manual.reason ? `: "${r.manual.reason}"` : ''}. The policy said ${fmtTime(r.policyDue)}.`;
-  if (r.state === 'met' && r.early) return `Finished ${fmtDur(r.early)} before it was due.`;
-  if (r.pausedClosed && r.due && r.firstDue.getTime() !== r.policyDue.getTime() && !r.stop && r.state !== 'breached')
-    return `Due moved from ${fmtTime(r.firstDue)} because the clock was paused ${fmtDur(r.pausedClosed)}.`;
-  return null;
 }
 
 /* The SLA that applied before the priority change. Kept in full for visibility (SlaTargetStatus.CANCELED).
@@ -317,11 +348,11 @@ export const PREVIOUS = {
   policy: 'P3 Standard', appliedAt: D(29, 16, 10), canceledAt: D(29, 17, 2), by: ME,
   change: 'Priority changed from Medium to High', rule: PREV_RULE, penaltyRule: 'No penalty on this SLA',
   clocks: [
-    { id: 'first', kind: 'SLA', name: 'First response', short: 'Response', start: D(29, 16, 10), target: 60, hours: NETWORK_HOURS,
-      stop: s => (s.noReply ? undefined : s.firstReply ?? D(29, 16, 24)), stopWhy: 'first reply sent to the requester', doneVerb: 'Replied', startWhy: 'Request created', startedWhen: 'When the request was created',
+    { id: 'first', kind: 'SLA', name: 'First response', start: D(29, 16, 10), target: 60, hours: NETWORK_HOURS,
+      stop: s => (s.noReply ? undefined : s.firstReply ?? D(29, 16, 24)), stopWhy: 'first reply sent to the requester', doneVerb: 'Replied', startedWhen: 'When the request was created',
       policy: 'P3 Standard – Response SLA', rule: PREV_RULE, escalations: [] },
-    { id: 'resolution', kind: 'SLA', name: 'Resolution', short: 'Resolution', start: D(29, 16, 10), target: 27 * 60, hours: NETWORK_HOURS,
-      stop: () => D(29, 17, 2), stopWhy: 'SLA canceled', doneVerb: 'Canceled', startWhy: 'Request created', startedWhen: 'When the request was created',
+    { id: 'resolution', kind: 'SLA', name: 'Resolution', start: D(29, 16, 10), target: 27 * 60, hours: NETWORK_HOURS,
+      stop: () => D(29, 17, 2), stopWhy: 'SLA canceled', doneVerb: 'Canceled', startedWhen: 'When the request was created',
       policy: 'P3 Standard – Resolution SLA', rule: PREV_RULE, escalations: [] },
   ] as ClockDef[],
 };
@@ -331,34 +362,27 @@ export const previousClocks = (s?: Scenario) => PREVIOUS.clocks.map(c => calc(c,
   noReply: !!s?.noReply || (!!s?.firstReply && s.firstReply > PREVIOUS.canceledAt), firstReply: s?.firstReply }));
 
 /** How a stopped clock finished, in plain words: "Replied 4:52 PM, 12m late". */
-export function finishedLine(r: ClockResult, long = false) {
+export function finishedLine(r: ClockResult) {
   if (!r.stop) return '';
-  const at = long ? fmtWhen(r.stop) : fmtTime(r.stop);
-  return r.breached
-    ? `${r.def.doneVerb} ${at}, ${fmtDur(r.counted - r.def.target)} late`
-    : `${r.def.doneVerb} ${at}`;
+  return r.breached ? `${r.def.doneVerb} ${fmtTime(r.stop)}, ${overBy(r)} late` : `${r.def.doneVerb} ${fmtTime(r.stop)}`;
 }
 
 /* History */
 export interface SlaEvent { at: Date; kind: 'attached' | 'paused' | 'resumed' | 'escalated' | 'overridden' | 'breached' | 'met' | 'handed-over' | 'excused' | 'canceled'; text: string; by: string }
-const lower = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
 /** What happened on one clock, oldest first, up to the scenario's now. */
 export function events(r: ClockResult, s: Scenario): SlaEvent[] {
   const { def } = r, ps = pausesOf(def, s), isBiz = bizOf(def), out: SlaEvent[] = [];
   const add = (at: Date, kind: SlaEvent['kind'], text: string, by = 'SLA engine') => { if (at <= s.now) out.push({ at, kind, text, by }); };
   add(def.start, 'attached', def.kind === 'UC'
     ? `${def.name.replace(' · UC', '')} contract applied when the vendor was set`
-    : `${def.policy.replace(/ – .*$/, '')} applied, counting from ${lower(def.startedWhen)}`);
+    : `${policyShort(def.policy)} applied, counting from ${lower(def.startedWhen)}`);
   for (const p of ps) if (p.from >= def.start && p.from <= r.end) {
     add(p.from, 'paused', `Paused, ${lower(p.why)}`, p.by);
     if (p.to && p.to <= r.end) add(p.to, 'resumed', p.to.getTime() - p.from.getTime() < 60000 ? 'Resumed' : `Resumed after ${fmtDur(count(p.from, p.to, isBiz))}`, p.by);
   }
   if (r.manual) add(r.manual.at, 'overridden', `Due time changed to ${fmtTime(r.manual.due)}.${r.manual.reason ? ` Reason: ${r.manual.reason}` : ''}`, r.manual.by);
   if (r.breached && r.due) add(r.due, 'breached', 'Breached');
-  for (const e of def.escalations) {
-    const need = Math.ceil(e.at * r.budget);
-    if (r.counted >= need) add(walk(def.start, need, t => isBiz(t) && !inPause(t, ps)), 'escalated', `Level ${e.level} escalation: ${e.action}`);
-  }
+  for (const e of r.escalated) add(e.at, 'escalated', `Level ${e.level} escalation: ${e.action}`);
   if (r.stop) {
     if (r.breached) add(r.stop, 'breached', finishedLine(r));
     else if (def.doneVerb === 'Handed over') add(r.stop, 'handed-over', `Handed over to ${def.stopWhy.replace(/^request moved to /, '')}`, ME);
@@ -368,10 +392,10 @@ export function events(r: ClockResult, s: Scenario): SlaEvent[] {
   return out.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
 
-/** Who held the request while this clock ran. */
-const ASSIGNED = [
-  { group: 'Service Desk', who: 'Darsh Patel', from: D(29, 16, 10), to: D(29, 17, 20) as Date | null },
-  { group: 'Network Team', who: ME, from: D(29, 17, 20), to: null as Date | null },
+/** Who held the request, and who assigned it. */
+export const ASSIGNED = [
+  { group: 'Service Desk', who: 'Darsh Patel', from: CREATED, to: D(29, 17, 20) as Date | null, by: 'System' },
+  { group: 'Network Team', who: ME, from: D(29, 17, 20), to: null as Date | null, by: ME },
 ];
 /** The assignment segments clipped to the clock's window, with the time counted and paused in each. `to: null` = still with them. */
 export function usage(r: ClockResult, s: Scenario) {
@@ -395,4 +419,22 @@ export function whyThis(r: ClockResult) {
     hours: def.hours.calendar ? def.hours.line : `${def.hours.name}, ${def.hours.line}`,
     started: `${def.startedWhen}, ${fmtStamp(def.start)}`,
   };
+}
+
+/* The Audit Trails tab for the demo request: the same story, in AuditTrailsTabContent's entry shape, newest first. */
+const PEOPLE: Record<string, [string, string]> = { System: ['SYS', '#6B7280'], [ME]: ['SJ', '#F59E0B'], 'Darsh Patel': ['DP', '#14B8A6'] };
+const stamp = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:00`;
+export function slaAudit(s: Scenario) {
+  const entry = (at: Date, user: string, action: string, details: string, changes: [string, string, string][] = []) =>
+    ({ at, id: `${action}-${at.getTime()}`, timestamp: stamp(at), user, userInitials: PEOPLE[user][0], userColor: PEOPLE[user][1], action, details,
+      changes: changes.map(([field, oldValue, newValue]) => ({ field, oldValue, newValue })) });
+  const log = s.log ?? [];
+  return [
+    entry(CREATED, 'System', 'Request Created', 'Request was created by Darshak Modi'),
+    ...log.slice(1).map((c, i) => entry(c.at, c.by, 'Status Changed', `Changed status from "${log[i].to}" to "${c.to}"`, [['Status', log[i].to, c.to]])),
+    entry(D(29, 17, 2), ME, 'Priority Updated', 'Changed priority from "Medium" to "High"', [['Priority', 'Medium', 'High']]),
+    entry(D(29, 17, 20), ME, 'Assignee Changed', 'Moved to Network Team and assigned to Sarah Johnson',
+      [['Technician Group', 'Service Desk', 'Network Team'], ['Assignee', 'Darsh Patel', ME]]),
+    entry(D(30, 9, 40), ME, 'Field Updated', 'Set vendor to Airtel Business', [['Vendor', 'None', 'Airtel Business']]),
+  ].filter(e => e.at <= s.now).sort((a, b) => b.at.getTime() - a.at.getTime()).map(({ at: _at, ...e }, i) => ({ ...e, id: `${e.id}-${i}` }));
 }
