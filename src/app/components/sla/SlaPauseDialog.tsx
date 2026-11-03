@@ -13,12 +13,14 @@ interface Props { status: string; clocks: ClockResult[]; onCancel: () => void; o
 export function SlaPauseDialog({ status, clocks, onCancel, onConfirm }: Props) {
   const [reason, setReason] = useState('');
   const select = useRef<HTMLSelectElement>(null);
+  const cancel = useRef(onCancel);
+  cancel.current = onCancel;   // the parent passes a new function every render; mount effects must not re-run for it
   useEffect(() => {
     select.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onCancel(); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); cancel.current(); } };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onCancel]);
+  }, []);
 
   // Pending and On Hold stop the SLA and the OLAs; the UC has its own flag and keeps running here.
   const running = clocks.filter(c => c.state === 'ok' || c.state === 'risk' || c.state === 'breached');
