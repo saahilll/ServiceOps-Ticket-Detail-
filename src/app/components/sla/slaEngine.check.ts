@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   CLOCKS, calc, D, fmtDue, fmtDur, finishedLine, headerSummary, events, usage, whyThis, shortValue, clockValue, overBy, clocksFor,
   setScenario, setManualDue, revertManualDue, excuse, removeExcuse, setStatus, slaSnapshot, PREVIOUS, previousClocks,
-  STATE_LABEL, type ScenarioKey, type ClockId, type ClockResult,
+  STATE_LABEL, slaAudit, timeline, canceledClocks, type ScenarioKey, type ClockId, type ClockResult,
 } from './slaEngine.ts';
 
 // Compute a scenario's clocks without React (useSla is a hook); the store holds the same Scenario.
@@ -63,7 +63,8 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   assert.equal(w.matched, 'Priority is High and Category is Network');
   assert.equal(w.hours, 'Network Team hours, Mon–Fri 9 AM–6 PM IST');
   assert.equal(w.started, 'When the request was created, Tue 29 Sep, 4:10 PM');
-  assert.equal(previousClocks(sc()).length, 2);
+  assert.equal(previousClocks(sc()).length, 3);
+  assert.deepEqual(canceledClocks(sc()).map(c => c.r.def.kind), ['SLA', 'SLA', 'OLA', 'UC']);
   assert.equal(PREVIOUS.canceledAt.getHours(), 17);
 }
 
@@ -75,13 +76,21 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   assert.equal(c.resolution!.penalty, 50);
   assert.equal(c.resolution!.escLevel, 2);
   assert.equal(c['ola-network']!.state, 'breached');
-  assert.equal(c['ola-network']!.penalty, 0);
+  assert.equal(c['ola-network']!.penalty, Math.ceil(-c['ola-network']!.left / 60) * 20);   // each clock carries its own penalty
   const ev = events(c.resolution!, sc());
   assert.ok(ev.some(e => e.kind === 'breached' && e.text === 'Breached' && hhmm(e.at) === '16:20'));
-  assert.ok(ev.some(e => e.kind === 'escalated' && e.text === 'Level 1 escalation: email to Priya Mehta (Network Team manager)'));
-  assert.ok(ev.some(e => e.kind === 'escalated' && e.text.startsWith('Level 2 escalation: reassigned to Priya Mehta')));
-  assert.ok(ev.some(e => e.kind === 'resumed' && e.text === 'Resumed after 1h 10m'));
-  assert.ok(ev.some(e => e.kind === 'paused' && e.text === 'Paused, waiting on requester'));
+  assert.ok(!ev.some(e => /escalation/i.test(e.text)));   // escalations go to the Audit Trail, not the clock history
+  const esc = slaAudit(sc()).filter(e => e.action === 'SLA Escalated').map(e => e.details);
+  assert.ok(esc.includes('Resolution: level 1 escalation, email to Priya Mehta (Network Team manager)'));
+  assert.ok(esc.some(d => d.startsWith('Resolution: level 2 escalation, reassigned to Priya Mehta')));
+  // the time bar: every minute once, counted minutes match, 45m past due
+  const segs = timeline(c.resolution!, sc());
+  assert.equal(segs.reduce((a, x) => a + x.mins, 0), (c.resolution!.end.getTime() - c.resolution!.def.start.getTime()) / 60000);
+  assert.equal(segs.filter(x => x.kind !== 'not').reduce((a, x) => a + x.mins, 0), c.resolution!.counted);
+  assert.equal(segs.filter(x => x.kind === 'over').reduce((a, x) => a + x.mins, 0), 45);
+  assert.ok(segs.some(x => x.why === 'Status Pending' && x.mins === 70));
+  assert.ok(ev.some(e => e.kind === 'resumed' && e.text === 'Counting again after 1h 10m'));
+  assert.ok(ev.some(e => e.kind === 'paused' && e.text === 'Not counted, status Pending'));
   assert.equal(ev[0].text, 'P2 High applied, counting from when the request was created');
   assert.equal(events(c.uc!, sc())[0].text, 'Airtel contract applied when the vendor was set');
   assert.deepEqual(ev.map(e => e.at.getTime()), [...ev.map(e => e.at.getTime())].sort((a, b) => a - b));
@@ -170,7 +179,7 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   const ev = events(clocksOf().resolution!, sc());
   assert.equal(ev.filter(e => e.kind === 'paused').length, 2);    // the earlier 10:30 pause plus this one
   assert.equal(ev.filter(e => e.kind === 'resumed').length, 2);
-  assert.ok(ev.some(e => e.kind === 'resumed' && e.text === 'Resumed'));   // a pause under a minute has no "after 0m"
+  assert.ok(ev.some(e => e.kind === 'resumed' && e.text === 'Counting again'));   // a pause under a minute has no "after 0m"
   assert.ok(!ev.some(e => /after 0m/.test(e.text)));
   assert.ok(ev.some(e => e.kind === 'paused' && hhmm(e.at) === '15:05'));
   assert.equal(clocksOf().resolution!.state, 'risk');
@@ -244,7 +253,7 @@ const hhmm = (d: Date | null | undefined) => d && `${d.getHours()}:${String(d.ge
   const r = clocksOf('manual').resolution!;
   assert.equal(r.escLevel, 1);
   assert.equal(hhmm(r.escalated[0].at), '14:20');
-  assert.ok(events(r, sc()).some(e => e.kind === 'escalated' && e.text.startsWith('Level 1') && hhmm(e.at) === '14:20'));
+  assert.ok(slaAudit(sc()).some(e => e.action === 'SLA Escalated' && e.details.startsWith('Resolution: level 1') && e.timestamp.endsWith('14:20:00')));
 }
 
 // status log: the story, then every change made on the page

@@ -11,7 +11,7 @@ import type { AssetFieldState, AgentInfo } from './AssetFields';
 import { assetKeyInfoFields, applyAssetKeyInfo } from './AssetFields';
 import { AdditionalFieldsAccordion } from './AdditionalFieldsAccordion';
 import { getSlaPenaltyAmount, formatPenaltyAmount } from './TicketDrawerUtils';
-import { SlaStatusLive, SlaPolicyName } from './sla/SlaStatusLive';
+import { SlaStatusLive, SlaPenaltyTotal } from './sla/SlaStatusLive';
 import { DateTimePickerPopup } from './DateTimePickerPopup';
 import { PinnedFieldsAccordion } from './PinnedFieldsAccordion';
 import { MiniCalendar, type CalendarEvent } from './MiniCalendar';
@@ -2289,9 +2289,9 @@ export function TicketPropertiesPanel(props: TicketPropertiesPanelProps) {
           >
             <div className="flex items-center gap-2">
               <Clock size={16} className="text-[#364658]" />
-              <h3 className="text-[13px] font-semibold text-[#364658]">SLA Status</h3>
-              {slaLive && <SlaPolicyName />}
+              <h3 className="text-[13px] font-semibold text-[#364658]">{slaLive ? 'Service Levels' : 'SLA Status'}</h3>
             </div>
+            {slaLive && <SlaPenaltyTotal />}
             <button
               className="text-[#7B8FA5] hover:text-[#364658] transition-colors"
             >

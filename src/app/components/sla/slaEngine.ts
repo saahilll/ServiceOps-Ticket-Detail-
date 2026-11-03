@@ -13,7 +13,8 @@ const MIN = 60_000;
 export const D = (d: number, h: number, m: number) => new Date(2026, 8, d, h, m);
 export const ME = 'Sarah Johnson';   // the signed-in technician in the demo
 
-export interface Pause { from: Date; to: Date | null; why: string; by: string }
+/** `status` is the request status that stopped the clock (whatever the admin named it); `why` is the optional reason given. */
+export interface Pause { from: Date; to: Date | null; why: string; status: string; by: string }
 export interface ManualDue { due: Date; by: string; at: Date; reason: string }
 export interface Excuse { by: string; at: Date; reason: string }
 export type Edge = 'nosla' | 'archived' | 'error';
@@ -34,7 +35,7 @@ const WEEKDAYS = 'Mon–Fri 9 AM–6 PM IST';
 const NETWORK_HOURS: Hours = { name: 'Network Team hours', line: WEEKDAYS };
 const DESK_HOURS: Hours = { name: 'Service Desk hours', line: WEEKDAYS };
 const ALL_HOURS: Hours = { name: 'Calendar hours', line: '24 x 7', calendar: true };
-const wfc = (from: Date, to: Date | null, why = 'Waiting on requester'): Pause => ({ from, to, why, by: ME });
+const wfc = (from: Date, to: Date | null, why = 'Waiting on requester'): Pause => ({ from, to, why, status: 'Pending', by: ME });
 
 export const PAUSE_REASONS = ['Waiting on requester', 'Waiting on vendor', 'Scheduled for later', 'Waiting on a change'];
 export const PAUSING_STATUSES = ['Pending', 'On Hold'];
@@ -73,13 +74,13 @@ export const CLOCKS: ClockDef[] = [
     policy: 'P2 High – OLA 1 (Service Desk, 1h 30m)', rule: [['Technician group', 'is', 'Service Desk']], escalations: [] },
   { id: 'ola-network', kind: 'OLA', name: 'Network Team · OLA', start: D(29, 17, 20), target: 360, hours: NETWORK_HOURS, stop: s => s.resolved,
     stopWhy: 'request resolved', doneVerb: 'Resolved', startedWhen: 'When the request was assigned to Network Team',
-    policy: 'P2 High – OLA 2 (Network Team, 6h)', rule: [['Technician group', 'is', 'Network Team']], escalations: [{ level: 1, at: 0.75, action: 'email to the Network Team' }] },
+    policy: 'P2 High – OLA 2 (Network Team, 6h)', rule: [['Technician group', 'is', 'Network Team']], penaltyPerHour: 20, escalations: [{ level: 1, at: 0.75, action: 'email to the Network Team' }] },
   /* Underpinning contract with the vendor — shown only when one applies (SlaHistoryType.UC). 24x7 contract.
    * It ignores Pending / On Hold: a UC has its own "Run UC" flag and in this demo it stays on. */
   { id: 'uc', kind: 'UC', name: 'Airtel · UC', start: D(30, 9, 40), target: 240, hours: ALL_HOURS,
     stop: s => (s.resolved && s.resolved < UC_RESTORED ? s.resolved : UC_RESTORED),
     stopWhy: 'vendor restored the link', doneVerb: 'Restored', startedWhen: 'When the vendor was set to Airtel Business',
-    policy: 'Airtel Business – Link restore UC (4h, 24 x 7)', rule: [['Vendor', 'is', 'Airtel Business']], escalations: [] },
+    policy: 'Airtel Business – Link restore UC (4h, 24 x 7)', rule: [['Vendor', 'is', 'Airtel Business']], penaltyPerHour: 100, escalations: [] },
 ];
 /** Two more team OLAs, only in the `many` scenario (stress test for a long card). Each waits on its own vendor. */
 const EXTRA_OLAS: ClockDef[] = [
@@ -217,6 +218,13 @@ export function fmtDue(d: Date, now: Date) {
 }
 const fmtStamp = (d: Date) => `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}, ${fmtTime(d)}`;
 
+/** SLA / OLA / UC marks: one blue ramp, darkest for the customer's promise, never a state colour.
+ *  `text` is the label colour (the UC shade is too light for 11px text). */
+export const KIND_COLOUR: Record<ClockDef['kind'], { line: string; tint: string; text: string }> = {
+  SLA: { line: '#1E5AA8', tint: '#EEF4FB', text: '#1E5AA8' },
+  OLA: { line: '#4A90D9', tint: '#F1F7FD', text: '#2F78C4' },
+  UC: { line: '#8AB8E6', tint: '#F5F9FE', text: '#4F84B8' },
+};
 export const STATE_LABEL: Record<ClockState, string> = { ok: 'On track', risk: 'At risk', paused: 'Paused', breached: 'Breached', met: 'Met', missed: 'Breached', excused: 'Excused' };  // a clock that stopped after its due time is Breached, not Met
 /* Tones reuse the ticket page's own SLA pill palette (green / amber / red) plus a neutral grey for paused. */
 export const STATE_TONE: Record<ClockState, { bg: string; text: string; bar: string }> = {
@@ -244,7 +252,7 @@ export function shortValue(r: ClockResult) {
   }
 }
 
-const handedOver = (r: ClockResult) => r.state === 'met' && r.def.doneVerb === 'Handed over';
+export const handedOver = (r: ClockResult) => r.state === 'met' && r.def.doneVerb === 'Handed over';
 /** The state chip: STATE_LABEL, except a finished team clock reads "Handed over" (grey). */
 export function clockChip(r: ClockResult) {
   return handedOver(r) ? { label: 'Handed over', tone: STATE_TONE.paused } : { label: STATE_LABEL[r.state], tone: STATE_TONE[r.state] };
@@ -272,7 +280,7 @@ const CREATED = D(29, 16, 10);
 function storyLog(s: Scenario): StatusChange[] {
   const out: StatusChange[] = [{ at: CREATED, to: 'Open', by: 'System' }, { at: D(29, 16, 24), to: 'In Progress', by: 'Darsh Patel' }];
   for (const p of s.pauses) {
-    out.push({ at: p.from, to: p.to ? 'Pending' : s.status, by: p.by });
+    out.push({ at: p.from, to: p.to ? p.status : s.status, by: p.by });
     if (p.to) out.push({ at: p.to, to: 'In Progress', by: p.by });
   }
   if (s.resolved) out.push({ at: s.resolved, to: 'Resolved', by: ME });
@@ -281,11 +289,15 @@ function storyLog(s: Scenario): StatusChange[] {
 const fresh = (k: ScenarioKey): Scenario => { const s = SCENARIOS[k]; return { ...s, pauses: [...s.pauses], manual: { ...s.manual }, excuses: { ...s.excuses }, log: storyLog(s) }; };
 let cur: Scenario = fresh('risk');
 let version = 0;
+/** Prototype-only: the card's group style (rail or tint), switched from the Demo chip. */
+export type CardStyle = 'rail' | 'tint';
+let cardStyle: CardStyle = 'rail';
 const subs = new Set<() => void>();
 const put = (s: Scenario) => { cur = s; version++; subs.forEach(f => f()); };
 const patch = (p: Partial<Scenario>) => put({ ...cur, ...p });
 /** Switching scenario drops every edit, then seeds manual / excuse from the scenario's own so revert and remove work on them. */
 export const setScenario = (k: ScenarioKey) => put(fresh(k));
+export const setCardStyle = (c: CardStyle) => { cardStyle = c; put(cur); };
 /** The existing "edit SLA date" pencil. Same rule as the backend's dueTimeManuallyUpdated: the hand-set time wins. */
 export const setManualDue = (id: ClockId, due: Date, reason: string) => patch({ manual: { ...cur.manual, [id]: { due, by: ME, at: cur.now, reason } } });
 export const revertManualDue = (id: ClockId) => { const manual = { ...cur.manual }; delete manual[id]; patch({ manual }); };
@@ -298,7 +310,7 @@ export function setStatus(label: string, reason?: string) {
   const now = cur.now, open = cur.pauses.some(p => !p.to);
   const log = label === cur.status ? cur.log : [...(cur.log ?? []), { at: now, to: label, by: ME }];
   if (PAUSING_STATUSES.includes(label)) {
-    patch({ status: label, log, pauses: open || cur.resolved ? cur.pauses : [...cur.pauses, { from: now, to: null, why: reason || label, by: ME }] });
+    patch({ status: label, log, pauses: open || cur.resolved ? cur.pauses : [...cur.pauses, { from: now, to: null, why: reason || label, status: label, by: ME }] });
   } else {
     const done = label === 'Resolved' || label === 'Closed';
     patch({ status: label, log, pauses: cur.pauses.map(p => (p.to ? p : { ...p, to: now })), resolved: done ? cur.resolved ?? now : undefined });
@@ -315,7 +327,7 @@ export function clocksFor(s: Scenario) {
 export function useSla() {
   useSyncExternalStore(f => { subs.add(f); return () => subs.delete(f); }, () => version);
   const s = cur, none = s.edge === 'nosla' || s.edge === 'error';
-  return { scenario: s, clocks: clocksFor(s), previous: none ? [] : previousClocks(s), status: s.status, edge: s.edge ?? null };
+  return { scenario: s, clocks: clocksFor(s), previous: none ? [] : previousClocks(s), status: s.status, edge: s.edge ?? null, cardStyle };
 }
 
 /** The one demo request the new SLA experience runs on. */
@@ -354,12 +366,31 @@ export const PREVIOUS = {
     { id: 'resolution', kind: 'SLA', name: 'Resolution', start: D(29, 16, 10), target: 27 * 60, hours: NETWORK_HOURS,
       stop: () => D(29, 17, 2), stopWhy: 'SLA canceled', doneVerb: 'Canceled', startedWhen: 'When the request was created',
       policy: 'P3 Standard – Resolution SLA', rule: PREV_RULE, escalations: [] },
+    { id: 'ola-desk', kind: 'OLA', name: 'Service Desk · OLA', start: D(29, 16, 10), target: 240, hours: DESK_HOURS,
+      stop: () => D(29, 17, 2), stopWhy: 'SLA canceled', doneVerb: 'Canceled', startedWhen: 'When the request was assigned to Service Desk',
+      policy: 'P3 Standard – OLA 1 (Service Desk, 4h)', rule: [['Technician group', 'is', 'Service Desk']], escalations: [] },
   ] as ClockDef[],
 };
 /** The earlier SLA's clocks, frozen at the moment it was canceled (no pauses had happened yet). */
 export const previousClocks = (s?: Scenario) => PREVIOUS.clocks.map(c => calc(c, { ...SCENARIOS.ok, now: PREVIOUS.canceledAt, pauses: [], manual: undefined, excuses: undefined, resolved: undefined,
   // a reply after the cancel time belongs to the new SLA, not this one
   noReply: !!s?.noReply || (!!s?.firstReply && s.firstReply > PREVIOUS.canceledAt), firstReply: s?.firstReply }));
+
+/* The vendor was first set to Tata Communications, then changed to Airtel Business: Tata's UC was canceled. */
+const UC_TATA: ClockDef = { id: 'uc', kind: 'UC', name: 'Tata Communications · UC', start: D(30, 9, 10), target: 240, hours: ALL_HOURS,
+  stop: () => D(30, 9, 40), stopWhy: 'vendor changed', doneVerb: 'Canceled', startedWhen: 'When the vendor was set to Tata Communications',
+  policy: 'Tata Communications – Link restore UC (4h, 24 x 7)', rule: [['Vendor', 'is', 'Tata Communications']], escalations: [] };
+const VENDOR_CHANGED = D(30, 9, 40);
+export interface Canceled { r: ClockResult; at: Date; why: string; by: string }
+/** Every clock a change replaced (SLA, OLA and UC), frozen when it was canceled, oldest first. */
+export function canceledClocks(s: Scenario): Canceled[] {
+  if (s.edge === 'nosla' || s.edge === 'error') return [];
+  const out: Canceled[] = [];
+  if (PREVIOUS.canceledAt <= s.now) out.push(...previousClocks(s).map(r => ({ r, at: PREVIOUS.canceledAt, why: `${PREVIOUS.change}, ${PREVIOUS.policy} replaced`, by: PREVIOUS.by })));
+  if (VENDOR_CHANGED <= s.now) out.push({ r: calc(UC_TATA, { ...s, now: VENDOR_CHANGED, pauses: [], manual: undefined, excuses: undefined, resolved: undefined }),
+    at: VENDOR_CHANGED, why: 'Vendor changed from Tata Communications to Airtel Business', by: ME });
+  return out;
+}
 
 /** How a stopped clock finished, in plain words: "Replied 4:52 PM, 12m late". */
 export function finishedLine(r: ClockResult) {
@@ -368,8 +399,8 @@ export function finishedLine(r: ClockResult) {
 }
 
 /* History */
-export interface SlaEvent { at: Date; kind: 'attached' | 'paused' | 'resumed' | 'escalated' | 'overridden' | 'breached' | 'met' | 'handed-over' | 'excused' | 'canceled'; text: string; by: string }
-/** What happened on one clock, oldest first, up to the scenario's now. */
+export interface SlaEvent { at: Date; kind: 'attached' | 'paused' | 'resumed' | 'overridden' | 'breached' | 'met' | 'handed-over' | 'excused' | 'canceled'; text: string; by: string }
+/** What happened on one clock, oldest first, up to the scenario's now. Escalations are a manager's business: they go to the Audit Trail. */
 export function events(r: ClockResult, s: Scenario): SlaEvent[] {
   const { def } = r, ps = pausesOf(def, s), isBiz = bizOf(def), out: SlaEvent[] = [];
   const add = (at: Date, kind: SlaEvent['kind'], text: string, by = 'SLA engine') => { if (at <= s.now) out.push({ at, kind, text, by }); };
@@ -377,12 +408,11 @@ export function events(r: ClockResult, s: Scenario): SlaEvent[] {
     ? `${def.name.replace(' · UC', '')} contract applied when the vendor was set`
     : `${policyShort(def.policy)} applied, counting from ${lower(def.startedWhen)}`);
   for (const p of ps) if (p.from >= def.start && p.from <= r.end) {
-    add(p.from, 'paused', `Paused, ${lower(p.why)}`, p.by);
-    if (p.to && p.to <= r.end) add(p.to, 'resumed', p.to.getTime() - p.from.getTime() < 60000 ? 'Resumed' : `Resumed after ${fmtDur(count(p.from, p.to, isBiz))}`, p.by);
+    add(p.from, 'paused', `Not counted, status ${p.status}`, p.by);
+    if (p.to && p.to <= r.end) add(p.to, 'resumed', p.to.getTime() - p.from.getTime() < 60000 ? 'Counting again' : `Counting again after ${fmtDur(count(p.from, p.to, isBiz))}`, p.by);
   }
   if (r.manual) add(r.manual.at, 'overridden', `Due time changed to ${fmtTime(r.manual.due)}.${r.manual.reason ? ` Reason: ${r.manual.reason}` : ''}`, r.manual.by);
   if (r.breached && r.due) add(r.due, 'breached', 'Breached');
-  for (const e of r.escalated) add(e.at, 'escalated', `Level ${e.level} escalation: ${e.action}`);
   if (r.stop) {
     if (r.breached) add(r.stop, 'breached', finishedLine(r));
     else if (def.doneVerb === 'Handed over') add(r.stop, 'handed-over', `Handed over to ${def.stopWhy.replace(/^request moved to /, '')}`, ME);
@@ -390,6 +420,23 @@ export function events(r: ClockResult, s: Scenario): SlaEvent[] {
   }
   if (r.excuse) add(r.excuse.at, 'excused', `Excused. Reason: ${r.excuse.reason}`, r.excuse.by);
   return out.sort((a, b) => a.at.getTime() - b.at.getTime());
+}
+
+export type SegKind = 'run' | 'not' | 'over';
+export interface Seg { kind: SegKind; from: Date; to: Date; mins: number; why?: string }
+/** Where the clock's time went, in order: counted, not counted (outside business hours, or a status that stops the clock;
+ *  a pause over a night shows once, as outside hours), and counted past due. */
+export function timeline(r: ClockResult, s: Scenario): Seg[] {
+  const ps = pausesOf(r.def, s), isBiz = bizOf(r.def), dueT = r.breached && r.due ? r.due.getTime() : Infinity, out: Seg[] = [];
+  for (let t = r.def.start.getTime(); t < r.end.getTime(); t += MIN) {
+    const d = new Date(t), p = ps.find(x => d >= x.from && d < (x.to ?? new Date(8.64e15)));
+    const why = !isBiz(d) ? 'Outside business hours' : p ? `Status ${p.status}` : undefined;
+    const kind: SegKind = why ? 'not' : t >= dueT ? 'over' : 'run';
+    const last = out[out.length - 1];
+    if (last && last.kind === kind && last.why === why) { last.to = new Date(t + MIN); last.mins++; }
+    else out.push({ kind, from: d, to: new Date(t + MIN), mins: 1, why });
+  }
+  return out;
 }
 
 /** Who held the request, and who assigned it. */
@@ -435,6 +482,8 @@ export function slaAudit(s: Scenario) {
     entry(D(29, 17, 2), ME, 'Priority Updated', 'Changed priority from "Medium" to "High"', [['Priority', 'Medium', 'High']]),
     entry(D(29, 17, 20), ME, 'Assignee Changed', 'Moved to Network Team and assigned to Sarah Johnson',
       [['Technician Group', 'Service Desk', 'Network Team'], ['Assignee', 'Darsh Patel', ME]]),
-    entry(D(30, 9, 40), ME, 'Field Updated', 'Set vendor to Airtel Business', [['Vendor', 'None', 'Airtel Business']]),
+    entry(D(30, 9, 10), ME, 'Field Updated', 'Set vendor to Tata Communications', [['Vendor', 'None', 'Tata Communications']]),
+    entry(VENDOR_CHANGED, ME, 'Field Updated', 'Changed vendor to Airtel Business', [['Vendor', 'Tata Communications', 'Airtel Business']]),
+    ...clocksFor(s).flatMap(r => r.escalated.map(e => entry(e.at, 'System', 'SLA Escalated', `${r.def.name}: level ${e.level} escalation, ${e.action}`))),
   ].filter(e => e.at <= s.now).sort((a, b) => b.at.getTime() - a.at.getTime()).map(({ at: _at, ...e }, i) => ({ ...e, id: `${e.id}-${i}` }));
 }

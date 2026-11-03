@@ -1920,6 +1920,14 @@ onStackActiveGroupChange,
   }, [openTickets.length, hasDrawerBeenInitialized]);
 
 
+  // Full view follows the window when it is resized (the small 1080 view keeps its size; maxWidth caps it on narrow screens).
+  // ponytail: a hand-dragged width also snaps back to full on resize; track a "full" flag if that matters.
+  useEffect(() => {
+    const onResize = () => setDrawerWidth(w => (w === 1080 ? w : window.innerWidth - 54));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   // Function to expand accordion and set optimal width
   const expandAccordion = () => {
     setIsAccordionCollapsed(false);
@@ -2278,7 +2286,7 @@ onStackActiveGroupChange,
   if (minimized) return <MinimizedDrawerRail items={stackTabs ?? openTickets} activeId={activeTicket?.id} onSelect={(id) => { onTabChange(id); setMinimized(false); }} onRestore={() => setMinimized(false)} />;
 
   return (
-    <div className={`fixed right-0 top-0 h-screen bg-white shadow-2xl z-50 flex flex-col ${drawerWidth <= 1080 ? 'border-l border-[#e5e7eb]' : ''}`} ref={drawerRef} style={{ width: `${drawerWidth}px` }} data-drawer>
+    <div className={`fixed right-0 top-0 h-screen bg-white shadow-2xl z-50 flex flex-col ${drawerWidth <= 1080 ? 'border-l border-[#e5e7eb]' : ''}`} ref={drawerRef} style={{ width: `${drawerWidth}px`, maxWidth: "calc(100vw - 54px)" }} data-drawer>
       {/* Resize Handle */}
       <div
         className="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize group z-[100]"
