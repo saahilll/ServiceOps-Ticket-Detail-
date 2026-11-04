@@ -41,7 +41,7 @@ function Chip({ label, tone }: { label: string; tone: { bg: string; text: string
 }
 
 export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
-  const { scenario, clocks, edge } = useSla();
+  const { scenario, clocks, edge, panelStyle } = useSla();
   const now = scenario.now;
   const [panel, setPanel] = useState<Panel>(null);
   const [history, setHistory] = useState<Set<string>>(new Set());
@@ -49,6 +49,7 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
   const [showCanceled, setShowCanceled] = useState(false);
   const [flash, setFlash] = useState<ClockId | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [sel, setSel] = useState<ClockId | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const cards = useRef<Partial<Record<ClockId, HTMLDivElement | null>>>({});
@@ -59,7 +60,7 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
     const clicked = focus ? clocks.find(c => c.def.id === focus) : undefined;
     const kind = clicked?.def.kind ?? 'SLA';
     const lead = clicked?.def.id ?? headerSummary(clocks.filter(c => c.def.kind === kind)).clock?.def.id;
-    setPanel(null); setHistory(new Set()); setShowCanceled(false); setFilter(kind); setFlash(focus); setExpanded(new Set(lead ? [lead] : []));
+    setPanel(null); setHistory(new Set()); setShowCanceled(false); setFilter(kind); setFlash(focus); setExpanded(new Set(lead ? [lead] : [])); setSel(lead ?? null);
     const raf = requestAnimationFrame(() => {
       dialogRef.current?.focus({ preventScroll: true });
       const body = bodyRef.current, el = focus ? cards.current[focus] : null;
@@ -108,6 +109,8 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
     const l = clocks.filter(c => c.def.kind === k);
     return l.some(c => c.state === 'breached') ? STATE_TONE.breached.text : l.some(c => c.state === 'risk') ? STATE_TONE.risk.text : null;
   };
+  // B and C show one selected clock: the picked one if it is in the filter, else the filter's first
+  const current = list.find(c => c.def.id === sel) ?? list[0];
   const filters = KINDS.filter(k => clocks.some(c => c.def.kind === k) || canceled.some(c => c.r.def.kind === k));
 
   return createPortal(
@@ -146,12 +149,14 @@ export function SlaDetailsDrawer({ isOpen, onClose, focus }: Props) {
           )}
           {edge === 'nosla' && <DueByCard {...shared} />}
           {edge === 'archived' && scenario.deletedOn && <p className="text-[12px] text-[#7B8FA5]">{archivedNote(scenario.deletedOn).join(' ')}</p>}
-          {list.map(r => (
+          {(panelStyle === 'A' || panelStyle === 'D') && list.map(r => (
             <div key={r.def.id} ref={el => { cards.current[r.def.id] = el; }}
               className={`rounded-r-xl transition-shadow duration-500 ${flash === r.def.id ? 'ring-2 ring-[#3D8BD0]/40' : ''}`}>
-              <ClockCard r={r} {...shared} />
+              <ClockCard r={r} steps={panelStyle === 'D'} {...shared} />
             </div>
           ))}
+          {panelStyle === 'B' && list.length > 0 && <SummaryList list={list} current={current!} onPick={setSel} {...shared} />}
+          {panelStyle === 'C' && list.length > 0 && <FocusView list={list} current={current!} onPick={setSel} {...shared} />}
           {filter !== 'All' && list.length === 0 && gone.length > 0 && <p className="text-[13px] text-[#7B8FA5]">No {NOUN[filter]} runs on this request now.</p>}
           {gone.length > 0 && (
             <CanceledBlock items={gone} filter={filter} open={showCanceled} onToggle={() => setShowCanceled(v => !v)} />
@@ -217,60 +222,167 @@ function Tag({ children, tip }: { children: ReactNode; tip?: string }) {
   return tip ? <Tooltip><TooltipTrigger asChild>{tag}</TooltipTrigger><TooltipContent side="top" className="text-wrap">{tip}</TooltipContent></Tooltip> : tag;
 }
 
-function ClockCard({ r, now, scenario, history, toggleHistory, expanded, toggleCard }: { r: ClockResult } & Shared) {
-  const { def } = r, id = def.id, chip = clockChip(r), why = whyThis(r);
-  const done = !!r.stop || r.state === 'excused';
+/** Name, state chip and the big number; the policy line under it (and how a finished clock ended, while folded). */
+function ClockHead({ r, open }: { r: ClockResult; open?: boolean }) {
+  const { def } = r, chip = clockChip(r), done = !!r.stop || r.state === 'excused';
   const valueColor = r.state === 'ok' ? '#111827' : r.state === 'met' && def.doneVerb !== 'Handed over' ? STATE_TONE.met.text : chip.tone.text;
+  return (
+    <>
+      <span className="flex items-center gap-2">
+        <span className={`truncate text-[14px] font-semibold ${done ? 'text-[#64748B]' : 'text-[#111827]'}`}>{shortName(def.name)}</span>
+        <Chip {...chip} />
+        <span className={`ml-auto whitespace-nowrap pl-3 font-semibold tabular-nums ${done ? 'text-[14px]' : 'text-[17px]'}`} style={{ color: valueColor }}>{clockValue(r)}</span>
+        {open !== undefined && <ChevronDown size={16} aria-hidden="true" className={`flex-shrink-0 text-[#9CA3AF] transition-transform ${open ? 'rotate-180' : ''}`} />}
+      </span>
+      <span className="mt-0.5 block truncate text-[12px] text-[#7B8FA5]">
+        {r.stop && !open ? `${def.doneVerb} ${short(r.stop)} · ` : ''}{def.policy}
+      </span>
+    </>
+  );
+}
+
+/* What every layout shows for one clock: the time bar and tiles (or, in D, the step timeline), the rules as tags,
+ * and the history fold. `historyOpen` shows the history without the fold (layout C). */
+function ClockDetails({ r, now, scenario, history, toggleHistory, steps, historyOpen }: { r: ClockResult; steps?: boolean; historyOpen?: boolean } & Shared) {
+  const { def } = r, id = def.id, why = whyThis(r);
   const notCounted = timeline(r, scenario).filter(x => x.kind === 'not').reduce((a, x) => a + x.mins, 0);
-  const isOpen = expanded.has(id);
   const team = shortName(def.name);
   const holder = def.kind === 'OLA' ? usage(r, scenario).find(u => u.group === team)?.who : undefined;
   const evs = events(r, scenario);
-
+  const showHistory = historyOpen || history.has(id);
   return (
-    <div className="rounded-r-xl border border-l-2 border-[#EEF1F5] bg-white" style={{ borderLeftColor: KIND_COLOUR[def.kind].line }}>
-      <button id={`sla-card-${id}`} aria-expanded={isOpen} onClick={() => toggleCard(id)} className={`block w-full rounded-r-xl px-4 py-3 text-left transition-colors hover:bg-[#FAFBFC] ${FOCUS}`}>
-        <span className="flex items-center gap-2">
-          <span className={`truncate text-[14px] font-semibold ${done ? 'text-[#64748B]' : 'text-[#111827]'}`}>{shortName(def.name)}</span>
-          <Chip {...chip} />
-          <span className={`ml-auto whitespace-nowrap pl-3 font-semibold tabular-nums ${done ? 'text-[14px]' : 'text-[17px]'}`} style={{ color: valueColor }}>{clockValue(r)}</span>
-          <ChevronDown size={16} aria-hidden="true" className={`flex-shrink-0 text-[#9CA3AF] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-        </span>
-        <span className="mt-0.5 block truncate text-[12px] text-[#7B8FA5]">
-          {r.stop && !isOpen ? `${def.doneVerb} ${short(r.stop)} · ` : ''}{def.policy}
-        </span>
-      </button>
-
-      {isOpen && (
-        <div className="px-4 pb-4">
-          <div className="pt-1"><TimeBar r={r} scenario={scenario} now={now} /></div>
-          <div className={`mt-3 grid gap-2 ${r.penalty > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-            <Tile label="Counted" value={fmtDur(r.counted)} sub={`of ${fmtDur(r.budget)}`} />
-            <Tile label="Not counted" value={fmtDur(notCounted)} />
-            {r.penalty > 0 && <Tile label="Penalty" value={money(r.penalty)} danger />}
-          </div>
-          {r.excuse && <p className="mt-2 text-[12px] text-[#4A5568]">Excused by {r.excuse.by}: {r.excuse.reason}</p>}
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            <Tag tip={why.hours}>{def.hours.calendar ? 'Counts 24 x 7' : def.hours.name}</Tag>
-            {def.penaltyPerHour ? <Tag>${def.penaltyPerHour} per hour over</Tag> : null}
-            {def.kind === 'OLA' && <Tag>{holder ? `${team}, ${holder}` : team}</Tag>}
-            {def.kind === 'UC' && <Tag>{def.rule[0][2]}</Tag>}
-          </div>
-
-          <div className="mt-3.5 flex">
-            <button onClick={() => toggleHistory(id)} aria-expanded={history.has(id)}
-              className={`flex items-center gap-1 rounded text-[12px] font-medium text-[#4A5568] hover:text-[#111827] ${FOCUS}`}>
-              History ({evs.length})
-              <ChevronDown size={14} aria-hidden="true" className={`text-[#9CA3AF] transition-transform ${history.has(id) ? 'rotate-180' : ''}`} />
-            </button>
-          </div>
-
-          {history.has(id) && <>
-            <Timeline evs={evs} now={now} />
-            <Usage r={r} scenario={scenario} />
-          </>}
+    <>
+      {steps ? <>
+        <p className="text-[13px] text-[#364658]">
+          {fmtDur(r.counted)} of {fmtDur(r.budget)} counted<span className="text-[#7B8FA5]"> · {fmtDur(notCounted)} not counted</span>
+          {r.penalty > 0 && <span className="ml-2 rounded bg-[#FFEBEE] px-1.5 py-0.5 text-[12px] font-semibold text-[#E74C3C]">Penalty {money(r.penalty)}</span>}
+        </p>
+        <Steps r={r} scenario={scenario} now={now} />
+      </> : <>
+        <div className="pt-1"><TimeBar r={r} scenario={scenario} now={now} /></div>
+        <div className={`mt-3 grid gap-2 ${r.penalty > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          <Tile label="Counted" value={fmtDur(r.counted)} sub={`of ${fmtDur(r.budget)}`} />
+          <Tile label="Not counted" value={fmtDur(notCounted)} />
+          {r.penalty > 0 && <Tile label="Penalty" value={money(r.penalty)} danger />}
+        </div>
+      </>}
+      {r.excuse && <p className="mt-2 text-[12px] text-[#4A5568]">Excused by {r.excuse.by}: {r.excuse.reason}</p>}
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        <Tag tip={why.hours}>{def.hours.calendar ? 'Counts 24 x 7' : def.hours.name}</Tag>
+        {def.penaltyPerHour ? <Tag>${def.penaltyPerHour} per hour over</Tag> : null}
+        {def.kind === 'OLA' && <Tag>{holder ? `${team}, ${holder}` : team}</Tag>}
+        {def.kind === 'UC' && <Tag>{def.rule[0][2]}</Tag>}
+      </div>
+      {historyOpen ? <div className="mt-4 text-[12px] font-medium text-[#4A5568]">History ({evs.length})</div> : (
+        <div className="mt-3.5 flex">
+          <button onClick={() => toggleHistory(id)} aria-expanded={history.has(id)}
+            className={`flex items-center gap-1 rounded text-[12px] font-medium text-[#4A5568] hover:text-[#111827] ${FOCUS}`}>
+            History ({evs.length})
+            <ChevronDown size={14} aria-hidden="true" className={`text-[#9CA3AF] transition-transform ${history.has(id) ? 'rotate-180' : ''}`} />
+          </button>
         </div>
       )}
+      {showHistory && <>
+        <Timeline evs={evs} now={now} />
+        <Usage r={r} scenario={scenario} />
+      </>}
+    </>
+  );
+}
+
+const CARD_EDGE = (r: ClockResult) => ({ borderLeftColor: KIND_COLOUR[r.def.kind].line });
+
+/* A and D: one folding card per clock. */
+function ClockCard({ r, steps, ...shared }: { r: ClockResult; steps?: boolean } & Shared) {
+  const id = r.def.id, isOpen = shared.expanded.has(id);
+  return (
+    <div className="rounded-r-xl border border-l-2 border-[#EEF1F5] bg-white" style={CARD_EDGE(r)}>
+      <button id={`sla-card-${id}`} aria-expanded={isOpen} onClick={() => shared.toggleCard(id)} className={`block w-full rounded-r-xl px-4 py-3 text-left transition-colors hover:bg-[#FAFBFC] ${FOCUS}`}>
+        <ClockHead r={r} open={isOpen} />
+      </button>
+      {isOpen && <div className="px-4 pb-4"><ClockDetails r={r} steps={steps} {...shared} /></div>}
+    </div>
+  );
+}
+
+/* B: every clock on one line (name, a thin used bar, the number); the picked one opens in full below the list. */
+function SummaryList({ list, current, onPick, ...shared }: { list: ClockResult[]; current: ClockResult; onPick: (id: ClockId) => void } & Shared) {
+  return (
+    <>
+      <div className="divide-y divide-[#F0F1F3] overflow-hidden rounded-xl border border-[#EEF1F5] bg-white">
+        {list.map(r => {
+          const on = r.def.id === current.def.id, chip = clockChip(r), done = !!r.stop || r.state === 'excused';
+          return (
+            <button key={r.def.id} onClick={() => onPick(r.def.id)} aria-pressed={on}
+              className={`flex w-full items-center gap-3 border-l-2 px-4 py-2.5 text-left text-[13px] transition-colors ${FOCUS} ${on ? 'bg-[#F7FAFE]' : 'hover:bg-[#FAFBFC]'}`}
+              style={CARD_EDGE(r)}>
+              <span className={`min-w-0 flex-1 truncate ${on ? 'font-semibold text-[#111827]' : done ? 'text-[#64748B]' : 'font-medium text-[#364658]'}`}>{shortName(r.def.name)}</span>
+              <span className="h-1 w-20 flex-shrink-0 overflow-hidden rounded-full bg-[#EEF1F5]" aria-hidden="true">
+                <span className="block h-full rounded-full" style={{ width: `${Math.min(r.pct, 1) * 100}%`, backgroundColor: chip.tone.bar }} />
+              </span>
+              <span className="w-[112px] flex-shrink-0 text-right font-semibold tabular-nums" style={{ color: r.state === 'ok' ? '#111827' : chip.tone.text }}>{clockValue(r)}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="rounded-r-xl border border-l-2 border-[#EEF1F5] bg-white px-4 py-3.5" style={CARD_EDGE(current)}>
+        <div className="mb-2"><ClockHead r={current} /></div>
+        <ClockDetails r={current} {...shared} />
+      </div>
+    </>
+  );
+}
+
+/* C: pick a clock from the chips; everything about it shows at once, history included, with no folds. */
+function FocusView({ list, current, onPick, ...shared }: { list: ClockResult[]; current: ClockResult; onPick: (id: ClockId) => void } & Shared) {
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        {list.map(r => {
+          const on = r.def.id === current.def.id, c = KIND_COLOUR[r.def.kind];
+          return (
+            <button key={r.def.id} onClick={() => onPick(r.def.id)} aria-pressed={on}
+              className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${FOCUS} ${on ? 'font-semibold' : 'border-[#DFE5ED] bg-white text-[#4A5568] hover:bg-[#F8FAFC]'}`}
+              style={on ? { borderColor: c.line, backgroundColor: c.tint, color: c.text } : undefined}>
+              {shortName(r.def.name)} · {clockValue(r)}
+            </button>
+          );
+        })}
+      </div>
+      <div className="rounded-r-xl border border-l-2 border-[#EEF1F5] bg-white px-4 py-4" style={CARD_EDGE(current)}>
+        <div className="mb-3"><ClockHead r={current} /></div>
+        <ClockDetails r={current} historyOpen {...shared} />
+      </div>
+    </>
+  );
+}
+
+/* D: the clock as a short story, read top to bottom — started, each stretch not counted (with why and how long),
+ * counting again, past due, then how it ended or when it is due. The latest 6 steps show; the rest open on demand. */
+function Steps({ r, scenario, now }: { r: ClockResult; scenario: Scenario; now: Date }) {
+  const [all, setAll] = useState(false);
+  const segs = timeline(r, scenario), run = r.breached ? '#94A3B8' : STATE_TONE[r.state === 'paused' || r.state === 'excused' ? 'ok' : r.state].bar;
+  const steps: { at: Date; text: string; dot: string; hollow?: boolean }[] = [{ at: r.def.start, text: 'Started, counting', dot: run }];
+  segs.forEach((x, i) => {
+    if (x.kind === 'not') steps.push({ at: x.from, text: `${x.why}, ${fmtDur(x.mins)}`, dot: NOT });
+    else if (x.kind === 'over') steps.push({ at: x.from, text: 'Past due, still counting', dot: STATE_TONE.breached.bar });
+    else if (i > 0 && segs[i - 1].kind === 'not') steps.push({ at: x.from, text: 'Counting again', dot: run });
+  });
+  if (r.stop) steps.push({ at: r.stop, text: r.breached ? `${r.def.doneVerb}, ${fmtDur(r.counted - r.budget)} late` : `${r.def.doneVerb}, met in ${fmtDur(r.counted)}`, dot: r.breached ? STATE_TONE.breached.bar : STATE_TONE.met.bar });
+  else if (r.due && !r.breached) steps.push({ at: r.due, text: 'Due', dot: run, hollow: true });
+  const shown = all ? steps : steps.slice(-6);
+  return (
+    <div className="mt-3">
+      {steps.length > 6 && !all && <button onClick={() => setAll(true)} className={`mb-2 ${LINK}`}>Show all {steps.length} steps</button>}
+      <ol className="border-l border-[#E5E7EB] pl-0">
+        {shown.map((x, i) => (
+          <li key={i} className="relative flex gap-3 pb-2.5 pl-4 last:pb-0">
+            <span aria-hidden="true" className="absolute -left-[5px] top-[5px] size-[9px] rounded-full" style={x.hollow ? { border: `2px solid ${x.dot}`, background: '#fff' } : { backgroundColor: x.dot }} />
+            <span className="w-[86px] flex-shrink-0 text-[12px] tabular-nums text-[#7B8FA5]">{x.at.toDateString() === now.toDateString() ? fmtTime(x.at) : short(x.at)}</span>
+            <span className={`text-[13px] ${x.hollow ? 'font-medium text-[#111827]' : 'text-[#364658]'}`}>{x.text}</span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

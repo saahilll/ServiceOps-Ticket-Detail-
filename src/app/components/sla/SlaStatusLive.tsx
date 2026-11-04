@@ -4,8 +4,8 @@ import { SlaDetailsDrawer } from './SlaDetailsDrawer';
 import { DueByPill } from '../TicketTable';
 import type { HeaderAlert } from '../HeaderAlertPills';
 import {
-  useSla, ME, setScenario, setCardStyle, SCENARIOS, headerSummary, handedOver, fmtDur, fmtTime, fmtDue, shortValue, overBy, lower, policyShort, archivedNote, LOAD_ERROR, PILL_TONE, STATE_LABEL, KIND_COLOUR,
-  type ClockId, type ClockResult, type ScenarioKey, type CardStyle,
+  useSla, ME, setScenario, setCardStyle, setPanelStyle, SCENARIOS, headerSummary, handedOver, fmtDur, fmtTime, fmtDue, shortValue, overBy, lower, policyShort, archivedNote, LOAD_ERROR, PILL_TONE, STATE_LABEL, KIND_COLOUR,
+  type ClockId, type ClockResult, type ScenarioKey, type CardStyle, type PanelStyle,
 } from './slaEngine';
 
 /* Service Levels card for the demo request, in the designers' card style (INC-31): label left, hourglass pill
@@ -168,7 +168,7 @@ export function SlaPenaltyTotal() {
 /** Prototype-only scenario switch, kept out of the product UI: a small chip bottom-left, sitting just above
  *  the reply bar (bottom-3 would cover its avatar and "Reply with AI" at 1440x900). */
 export function SlaDemoSwitch() {
-  const { scenario, cardStyle } = useSla();
+  const { scenario, cardStyle, panelStyle } = useSla();
   return (
     <label className="fixed bottom-[80px] left-[62px] z-[9000] flex items-center gap-1.5 rounded bg-[#111827]/90 px-2 py-1 text-[11px] text-white/70 shadow-md">
       Demo:
@@ -181,6 +181,11 @@ export function SlaDemoSwitch() {
         className="bg-transparent text-[11px] font-medium text-white outline-none">
         <option value="rail" className="text-[#111827]">Rail</option>
         <option value="tint" className="text-[#111827]">Tint</option>
+      </select>
+      <span className="ml-1">Panel:</span>
+      <select value={panelStyle} onChange={e => setPanelStyle(e.target.value as PanelStyle)} aria-label="Panel style"
+        className="bg-transparent text-[11px] font-medium text-white outline-none">
+        {([['A', 'A · Cards'], ['B', 'B · List'], ['C', 'C · Focus'], ['D', 'D · Steps']] as const).map(([v, l]) => <option key={v} value={v} className="text-[#111827]">{l}</option>)}
       </select>
     </label>
   );

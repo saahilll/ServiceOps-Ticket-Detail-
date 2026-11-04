@@ -292,12 +292,16 @@ let version = 0;
 /** Prototype-only: the card's group style (rail or tint), switched from the Demo chip. */
 export type CardStyle = 'rail' | 'tint';
 let cardStyle: CardStyle = 'rail';
+/** Prototype-only: which Service Level History layout to show (A cards, B list, C focus, D steps), switched from the Demo chip. */
+export type PanelStyle = 'A' | 'B' | 'C' | 'D';
+let panelStyle: PanelStyle = 'A';
 const subs = new Set<() => void>();
 const put = (s: Scenario) => { cur = s; version++; subs.forEach(f => f()); };
 const patch = (p: Partial<Scenario>) => put({ ...cur, ...p });
 /** Switching scenario drops every edit, then seeds manual / excuse from the scenario's own so revert and remove work on them. */
 export const setScenario = (k: ScenarioKey) => put(fresh(k));
 export const setCardStyle = (c: CardStyle) => { cardStyle = c; put(cur); };
+export const setPanelStyle = (p: PanelStyle) => { panelStyle = p; put(cur); };
 /** The existing "edit SLA date" pencil. Same rule as the backend's dueTimeManuallyUpdated: the hand-set time wins. */
 export const setManualDue = (id: ClockId, due: Date, reason: string) => patch({ manual: { ...cur.manual, [id]: { due, by: ME, at: cur.now, reason } } });
 export const revertManualDue = (id: ClockId) => { const manual = { ...cur.manual }; delete manual[id]; patch({ manual }); };
@@ -327,7 +331,7 @@ export function clocksFor(s: Scenario) {
 export function useSla() {
   useSyncExternalStore(f => { subs.add(f); return () => subs.delete(f); }, () => version);
   const s = cur, none = s.edge === 'nosla' || s.edge === 'error';
-  return { scenario: s, clocks: clocksFor(s), previous: none ? [] : previousClocks(s), status: s.status, edge: s.edge ?? null, cardStyle };
+  return { scenario: s, clocks: clocksFor(s), previous: none ? [] : previousClocks(s), status: s.status, edge: s.edge ?? null, cardStyle, panelStyle };
 }
 
 /** The one demo request the new SLA experience runs on. */
