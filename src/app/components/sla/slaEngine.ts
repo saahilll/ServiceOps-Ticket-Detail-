@@ -412,7 +412,7 @@ export function events(r: ClockResult, s: Scenario): SlaEvent[] {
     ? `${def.name.replace(' · UC', '')} contract applied when the vendor was set`
     : `${policyShort(def.policy)} applied, counting from ${lower(def.startedWhen)}`);
   for (const p of ps) if (p.from >= def.start && p.from <= r.end) {
-    add(p.from, 'paused', `Not counted, status ${p.status}`, p.by);
+    add(p.from, 'paused', `Excluded, status ${p.status}`, p.by);
     if (p.to && p.to <= r.end) add(p.to, 'resumed', p.to.getTime() - p.from.getTime() < 60000 ? 'Counting again' : `Counting again after ${fmtDur(count(p.from, p.to, isBiz))}`, p.by);
   }
   if (r.manual) add(r.manual.at, 'overridden', `Due time changed to ${fmtTime(r.manual.due)}.${r.manual.reason ? ` Reason: ${r.manual.reason}` : ''}`, r.manual.by);

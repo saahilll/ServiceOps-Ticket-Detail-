@@ -182,7 +182,7 @@ function TimeBar({ r, scenario, now }: { r: ClockResult; scenario: Scenario; now
   // a late clock: the time before due stays neutral so the red past-due stretch stands out
   const run = r.breached || r.state === 'paused' || r.state === 'excused' ? '#94A3B8' : STATE_TONE[r.state].bar;
   const colour: Record<SegKind, string> = { run, not: NOT, over: STATE_TONE.breached.bar };
-  const tip: Record<SegKind, string> = { run: 'Counted', not: '', over: 'Counted past due' };
+  const tip: Record<SegKind, string> = { run: 'Elapsed', not: '', over: 'Elapsed past due' };
   const left = isRunning(r) && r.left > 0 ? r.left : 0;
   const end = r.stop ? `${r.def.doneVerb} ${short(r.stop)}`
     : r.due ? `Due ${fmtDue(r.due, now)}${r.manual ? ', set by hand' : ''}` : 'Due time set when counting restarts';
@@ -254,15 +254,15 @@ function ClockDetails({ r, now, scenario, history, toggleHistory, steps, history
     <>
       {steps ? <>
         <p className="text-[13px] text-[#364658]">
-          {fmtDur(r.counted)} of {fmtDur(r.budget)} counted<span className="text-[#7B8FA5]"> · {fmtDur(notCounted)} not counted</span>
+          {fmtDur(r.counted)} of {fmtDur(r.budget)} elapsed<span className="text-[#7B8FA5]"> · {fmtDur(notCounted)} excluded</span>
           {r.penalty > 0 && <span className="ml-2 rounded bg-[#FFEBEE] px-1.5 py-0.5 text-[12px] font-semibold text-[#E74C3C]">Penalty {money(r.penalty)}</span>}
         </p>
         <Steps r={r} scenario={scenario} now={now} />
       </> : <>
         <div className="pt-1"><TimeBar r={r} scenario={scenario} now={now} /></div>
         <div className={`mt-3 grid gap-2 ${r.penalty > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-          <Tile label="Counted" value={fmtDur(r.counted)} sub={`of ${fmtDur(r.budget)}`} />
-          <Tile label="Not counted" value={fmtDur(notCounted)} />
+          <Tile label="Elapsed" value={fmtDur(r.counted)} sub={`of ${fmtDur(r.budget)}`} />
+          <Tile label="Excluded" value={fmtDur(notCounted)} />
           {r.penalty > 0 && <Tile label="Penalty" value={money(r.penalty)} danger />}
         </div>
       </>}
@@ -452,7 +452,7 @@ function Usage({ r, scenario }: { r: ClockResult; scenario: Scenario }) {
         <thead>
           <tr className="text-left text-[11px] text-[#7B8FA5]">
             <th className={th}>Assignee</th><th className={th}>Technician Group</th><th className={th}>From</th><th className={th}>To</th>
-            <th className={`${th} pl-3 text-right`}>Counted</th>
+            <th className={`${th} pl-3 text-right`}>Elapsed</th>
           </tr>
         </thead>
         <tbody className="tabular-nums">
@@ -488,7 +488,7 @@ function CanceledBlock({ items, filter, open, onToggle }: { items: Canceled[]; f
                   <span className="text-[13px] font-medium text-[#64748B]">{shortName(r.def.name)}</span>
                   <Chip label="Canceled" tone={STATE_TONE.excused} />
                   <span className="ml-auto text-[12px] tabular-nums text-[#64748B]">
-                    {finishedFirst ? `Met in ${fmtDur(r.counted)} before it ended` : `${fmtDur(r.counted)} counted of ${fmtDur(r.def.target)}`}
+                    {finishedFirst ? `Met in ${fmtDur(r.counted)} before it ended` : `${fmtDur(r.counted)} elapsed of ${fmtDur(r.def.target)}`}
                   </span>
                 </div>
                 <div className="mt-0.5 pl-3.5 text-[12px] text-[#7B8FA5]">{r.def.policy}. {why}, {short(at)}, by {by}.</div>
