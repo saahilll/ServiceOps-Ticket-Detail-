@@ -451,14 +451,14 @@ function Usage({ r, scenario }: { r: ClockResult; scenario: Scenario }) {
       <table className="w-full text-[12px] text-[#364658]">
         <thead>
           <tr className="text-left text-[11px] text-[#7B8FA5]">
-            <th className={th}>Team</th><th className={th}>Person</th><th className={th}>From</th><th className={th}>To</th>
+            <th className={th}>Assignee</th><th className={th}>Technician Group</th><th className={th}>From</th><th className={th}>To</th>
             <th className={`${th} pl-3 text-right`}>Counted</th>
           </tr>
         </thead>
         <tbody className="tabular-nums">
           {rows.map((u, i) => (
             <tr key={i} className="border-t border-[#F0F1F3]">
-              <td className={td}>{u.group}</td><td className={td}>{u.who}</td><td className={td}>{short(u.from)}</td><td className={td}>{u.to ? short(u.to) : 'Now'}</td>
+              <td className={td}>{u.who}</td><td className={td}>{u.group}</td><td className={td}>{short(u.from)}</td><td className={td}>{u.to ? short(u.to) : 'Now'}</td>
               <td className={`${td} pl-3 text-right`}>{fmtDur(u.counted)}</td>
             </tr>
           ))}
